@@ -1,0 +1,256 @@
+package com.fersaiyan.cyanbridge.shared.glasses
+
+import com.fersaiyan.cyanbridge.shared.navigation.AppDestination
+import com.fersaiyan.cyanbridge.shared.plugins.NativePluginShortcutAction
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class DashboardSessionPolicyTest {
+    private val allActions: List<GlassesDashboardAction> = listOf(
+        GlassesDashboardAction.Navigate(AppDestination.SETTINGS),
+        GlassesDashboardAction.Scan,
+        GlassesDashboardAction.Reconnect,
+        GlassesDashboardAction.Disconnect,
+        GlassesDashboardAction.SelectMeetingTimer(1),
+        GlassesDashboardAction.StartMeetingCapture,
+        GlassesDashboardAction.StopMeetingCapture,
+        GlassesDashboardAction.RunNativePluginShortcut(NativePluginShortcutAction.START),
+        GlassesDashboardAction.SelectAssistantMode(GlassesAssistantMode.PHONE_ASSISTANT),
+        GlassesDashboardAction.SetAiWakeWordRoute(AiWakeWordRoute.entries.first()),
+        GlassesDashboardAction.SelectImageThumbnailQuality(1),
+        GlassesDashboardAction.SetGeminiLiveImageDelay(2),
+        GlassesDashboardAction.RefreshRecordingSettings,
+        GlassesDashboardAction.SetWearingDetection(true),
+        GlassesDashboardAction.SetVideoRecordingDuration(30),
+        GlassesDashboardAction.SetAudioRecordingDuration(1_800),
+        GlassesDashboardAction.TestVoiceQuestion,
+        GlassesDashboardAction.TestImageQuestion,
+        GlassesDashboardAction.OpenExternalImageAutomationDiagnostics,
+        GlassesDashboardAction.CapturePhoto,
+        GlassesDashboardAction.ToggleVideo,
+        GlassesDashboardAction.StartAudioRecording,
+        GlassesDashboardAction.RequestMediaCount,
+        GlassesDashboardAction.StartSync,
+        GlassesDashboardAction.StopSync,
+        GlassesDashboardAction.ToggleAdvanced,
+        GlassesDashboardAction.StartAgent,
+        GlassesDashboardAction.StopAgent,
+        GlassesDashboardAction.RunAgentDemo,
+        GlassesDashboardAction.RequestBattery,
+        GlassesDashboardAction.RequestVersion,
+        GlassesDashboardAction.SyncTime,
+        GlassesDashboardAction.RequestVolume,
+        GlassesDashboardAction.OpenSdkFirmwareUpdate,
+        GlassesDashboardAction.OpenLiveBroadcast,
+        GlassesDashboardAction.AddDeviceListener,
+        GlassesDashboardAction.StartClassicBluetoothScan,
+        GlassesDashboardAction.DumpOtaInfo,
+        GlassesDashboardAction.TestPullOta,
+        GlassesDashboardAction.RequestOtaFirmware(OtaFirmwareSource.entries.first()),
+        GlassesDashboardAction.SubmitFirmwarePatchRequest("user@example.com"),
+        GlassesDashboardAction.DismissFirmwarePatchRequest,
+        GlassesDashboardAction.CancelOta,
+        GlassesDashboardAction.StartLivePreview,
+        GlassesDashboardAction.StopLivePreview,
+        GlassesDashboardAction.RequestStartWifiAdbDebug,
+        GlassesDashboardAction.StopWifiAdbDebug,
+        GlassesDashboardAction.MetaRegister,
+        GlassesDashboardAction.MetaOpenPairing,
+        GlassesDashboardAction.MetaOpenMetaAi,
+        GlassesDashboardAction.MetaUnregister,
+        GlassesDashboardAction.MetaStartSession,
+        GlassesDashboardAction.MetaStopSession,
+        GlassesDashboardAction.MetaStartStream,
+        GlassesDashboardAction.MetaStopStream,
+        GlassesDashboardAction.MetaCapturePhoto,
+        GlassesDashboardAction.MetaViewPhoto,
+        GlassesDashboardAction.MetaStartDisplay,
+        GlassesDashboardAction.MetaStopDisplay,
+        GlassesDashboardAction.MetaSendDiagnostics,
+        GlassesDashboardAction.MeizuConnect,
+        GlassesDashboardAction.MeizuDisconnect,
+        GlassesDashboardAction.MeizuSendTestNotification,
+        GlassesDashboardAction.MeizuShowTestTeleprompter,
+        GlassesDashboardAction.MeizuSyncClock,
+        GlassesDashboardAction.MeizuSetComfortBrightness,
+        GlassesDashboardAction.MemoMindPanel(MemoMindPanelCommand.CONNECT),
+        GlassesDashboardAction.FamilyFirmware(FamilyFirmwareCommand.CHECK_OFFICIAL),
+        GlassesDashboardAction.DismissTransportPermissionDialog,
+        GlassesDashboardAction.RequestTransportPermission,
+    )
+
+    private val ignoringSession = setOf(
+        "SubmitFirmwarePatchRequest",
+        "SelectImageThumbnailQuality",
+        "SetGeminiLiveImageDelay",
+        "SetAiWakeWordRoute",
+        "DismissFirmwarePatchRequest",
+        "MetaSendDiagnostics",
+    )
+
+    private val allowedDuringMetaCamera = setOf(
+        "Navigate",
+        "StartMeetingCapture",
+        "StopMeetingCapture",
+        "RunNativePluginShortcut",
+        "SelectAssistantMode",
+        "TestVoiceQuestion",
+        "TestImageQuestion",
+        "OpenExternalImageAutomationDiagnostics",
+        "StartAgent",
+        "StopAgent",
+        "RunAgentDemo",
+        "MetaStopSession",
+        "MetaStopStream",
+        "MetaStopDisplay",
+        "MetaCapturePhoto",
+        "MetaViewPhoto",
+        "MetaStartSession",
+        "MetaStartStream",
+        "MetaStartDisplay",
+        "MetaSendDiagnostics",
+    )
+
+    private fun assertEqualsWithMessage(message: String, expected: Any?, actual: Any?) =
+        assertEquals(expected, actual, message)
+
+    private fun GlassesDashboardAction.name(): String = this::class.simpleName!!
+
+    /** Fails to compile when a new action is added without extending [allActions]. */
+    private fun requireListed(action: GlassesDashboardAction): Unit = when (action) {
+        is GlassesDashboardAction.Navigate,
+        GlassesDashboardAction.Scan,
+        GlassesDashboardAction.Reconnect,
+        GlassesDashboardAction.Disconnect,
+        is GlassesDashboardAction.SelectMeetingTimer,
+        GlassesDashboardAction.StartMeetingCapture,
+        GlassesDashboardAction.StopMeetingCapture,
+        is GlassesDashboardAction.RunNativePluginShortcut,
+        is GlassesDashboardAction.SelectAssistantMode,
+        is GlassesDashboardAction.SetAiWakeWordRoute,
+        is GlassesDashboardAction.SelectImageThumbnailQuality,
+        is GlassesDashboardAction.SetGeminiLiveImageDelay,
+        GlassesDashboardAction.RefreshRecordingSettings,
+        is GlassesDashboardAction.SetWearingDetection,
+        is GlassesDashboardAction.SetVideoRecordingDuration,
+        is GlassesDashboardAction.SetAudioRecordingDuration,
+        GlassesDashboardAction.TestVoiceQuestion,
+        GlassesDashboardAction.TestImageQuestion,
+        GlassesDashboardAction.OpenExternalImageAutomationDiagnostics,
+        GlassesDashboardAction.CapturePhoto,
+        GlassesDashboardAction.ToggleVideo,
+        GlassesDashboardAction.StartAudioRecording,
+        GlassesDashboardAction.RequestMediaCount,
+        GlassesDashboardAction.StartSync,
+        GlassesDashboardAction.StopSync,
+        GlassesDashboardAction.ToggleAdvanced,
+        GlassesDashboardAction.StartAgent,
+        GlassesDashboardAction.StopAgent,
+        GlassesDashboardAction.RunAgentDemo,
+        GlassesDashboardAction.RequestBattery,
+        GlassesDashboardAction.RequestVersion,
+        GlassesDashboardAction.SyncTime,
+        GlassesDashboardAction.RequestVolume,
+        GlassesDashboardAction.OpenSdkFirmwareUpdate,
+        GlassesDashboardAction.OpenLiveBroadcast,
+        GlassesDashboardAction.AddDeviceListener,
+        GlassesDashboardAction.StartClassicBluetoothScan,
+        GlassesDashboardAction.DumpOtaInfo,
+        GlassesDashboardAction.TestPullOta,
+        is GlassesDashboardAction.RequestOtaFirmware,
+        is GlassesDashboardAction.SubmitFirmwarePatchRequest,
+        GlassesDashboardAction.DismissFirmwarePatchRequest,
+        GlassesDashboardAction.CancelOta,
+        GlassesDashboardAction.StartLivePreview,
+        GlassesDashboardAction.StopLivePreview,
+        GlassesDashboardAction.RequestStartWifiAdbDebug,
+        GlassesDashboardAction.StopWifiAdbDebug,
+        GlassesDashboardAction.MetaRegister,
+        GlassesDashboardAction.MetaOpenPairing,
+        GlassesDashboardAction.MetaOpenMetaAi,
+        GlassesDashboardAction.MetaUnregister,
+        GlassesDashboardAction.MetaStartSession,
+        GlassesDashboardAction.MetaStopSession,
+        GlassesDashboardAction.MetaStartStream,
+        GlassesDashboardAction.MetaStopStream,
+        GlassesDashboardAction.MetaCapturePhoto,
+        GlassesDashboardAction.MetaViewPhoto,
+        GlassesDashboardAction.MetaStartDisplay,
+        GlassesDashboardAction.MetaStopDisplay,
+        GlassesDashboardAction.MetaSendDiagnostics,
+        GlassesDashboardAction.MeizuConnect,
+        GlassesDashboardAction.MeizuDisconnect,
+        GlassesDashboardAction.MeizuSendTestNotification,
+        GlassesDashboardAction.MeizuShowTestTeleprompter,
+        GlassesDashboardAction.MeizuSyncClock,
+        GlassesDashboardAction.MeizuSetComfortBrightness,
+        is GlassesDashboardAction.MemoMindPanel,
+        is GlassesDashboardAction.FamilyFirmware,
+        GlassesDashboardAction.DismissTransportPermissionDialog,
+        GlassesDashboardAction.RequestTransportPermission -> Unit
+    }
+
+    @Test
+    fun everyDashboardActionIsListedOnce() {
+        allActions.forEach(::requireListed)
+        assertEquals(70, allActions.size)
+        assertEquals(allActions.size, allActions.map { it.name() }.toSet().size)
+    }
+
+    @Test
+    fun onlyAppStateActionsIgnoreTheExclusiveSession() {
+        allActions.forEach { action ->
+            assertEqualsWithMessage(
+                action.name(),
+                action.name() in ignoringSession,
+                DashboardSessionPolicy.ignoresExclusiveSession(action),
+            )
+        }
+    }
+
+    @Test
+    fun wifiAdbDebugOnlyAllowsItsOwnStop() {
+        allActions.forEach { action ->
+            assertEqualsWithMessage(
+                action.name(),
+                action == GlassesDashboardAction.StopWifiAdbDebug,
+                DashboardSessionPolicy.isAllowedDuring(action, GlassesSession.WIFI_ADB_DEBUG),
+            )
+        }
+    }
+
+    @Test
+    fun metaCameraAllowsMetaAssistantAndAppActions() {
+        allActions.forEach { action ->
+            assertEqualsWithMessage(
+                action.name(),
+                action.name() in allowedDuringMetaCamera,
+                DashboardSessionPolicy.isAllowedDuring(action, GlassesSession.META_CAMERA),
+            )
+        }
+    }
+
+    @Test
+    fun heyCyanSessionsOnlyAllowNavigationAndTheirOwnStop() {
+        val ownStop = mapOf(
+            GlassesSession.MEDIA_SYNC to GlassesDashboardAction.StopSync,
+            GlassesSession.LIVE_PREVIEW to GlassesDashboardAction.StopLivePreview,
+            GlassesSession.OTA to GlassesDashboardAction.CancelOta,
+        )
+        ownStop.keys.forEach { session ->
+            allActions.forEach { action ->
+                // The OTA lease also covers the Mentra firmware update, whose screen stays reachable.
+                val returnsToOta = session == GlassesSession.OTA && action == GlassesDashboardAction.OpenSdkFirmwareUpdate
+                // A Mentra broadcast holds the live preview lease; its screen stays reachable to stop it.
+                val returnsToBroadcast = session == GlassesSession.LIVE_PREVIEW && action == GlassesDashboardAction.OpenLiveBroadcast
+                val expected = action is GlassesDashboardAction.Navigate || action == ownStop[session] || returnsToOta ||
+                    returnsToBroadcast
+                assertEqualsWithMessage(
+                    "${action.name()} during $session",
+                    expected,
+                    DashboardSessionPolicy.isAllowedDuring(action, session),
+                )
+            }
+        }
+    }
+}

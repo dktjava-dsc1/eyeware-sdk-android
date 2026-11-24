@@ -1,0 +1,98 @@
+package com.fersaiyan.cyanbridge.ai.live
+
+import com.fersaiyan.cyanbridge.ui.nav.AppRoute
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import com.fersaiyan.cyanbridge.shared.live.GeminiLiveRoute
+
+/**
+ * Request permissions before opening a background microphone session. If notifications
+ * are declined, use the visible activity-scoped preview with its own Stop button
+ * instead of starting an invisible microphone foreground service.
+ */
+class GeminiLivePermissionGateActivity : AppCompatActivity() {
+    private val permissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { launchPermittedRoute() }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val missing = requiredPermissions().filterNot(::granted)
+        if (missing.isEmpty()) launchPermittedRoute()
+        else if (savedInstanceState == null) permissions.launch(missing.toTypedArray())
+    }
+
+    private fun requiredPermissions(): List<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun launchPermittedRoute() {
+        val route = GeminiLiveRoute.of(
+            microphoneGranted = granted(Manifest.permission.RECORD_AUDIO),
+            notificationsAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                granted(Manifest.permission.POST_NOTIFICATIONS),
+        )
+        route.message?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+        val initialImage = intent.getStringExtra(EXTRA_INITIAL_IMAGE)
+        val initialPrompt = intent.getStringExtra(EXTRA_INITIAL_PROMPT)
+        when (route) {
+            GeminiLiveRoute.DENIED -> Unit
+            GeminiLiveRoute.BACKGROUND_SERVICE -> GeminiLiveForegroundService.start(
+                context = this,
+                language = intent.getStringExtra(EXTRA_LANGUAGE).orEmpty(),
+                imagePrompt = intent.getStringExtra(EXTRA_IMAGE_PROMPT).orEmpty(),
+                initialImagePath = initialImage,
+                initialPrompt = initialPrompt,
+                useRelay = intent.getBooleanExtra(EXTRA_USE_RELAY, false),
+            )
+            GeminiLiveRoute.VISIBLE_PREVIEW -> startActivity(AppRoute.GEMINI_LIVE.intent(this).apply {
+                putExtra(GeminiLiveDestination.EXTRA_AUTO_START, true)
+                initialImage?.let { putExtra(GeminiLiveDestination.EXTRA_INITIAL_IMAGE_PATH, it) }
+                initialPrompt?.let { putExtra(GeminiLiveDestination.EXTRA_INITIAL_PROMPT, it) }
+            })
+        }
+        finish()
+    }
+
+    private fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    companion object {
+        private const val EXTRA_LANGUAGE = "live_language"
+        private const val EXTRA_IMAGE_PROMPT = "live_image_prompt"
+        private const val EXTRA_INITIAL_IMAGE = "live_initial_image"
+        private const val EXTRA_INITIAL_PROMPT = "live_initial_prompt"
+        private const val EXTRA_USE_RELAY = "live_use_relay"
+
+        /** [context] is the calling screen, or the application when a glasses question started without one. */
+        fun launch(
+            context: Context,
+            language: String,
+            imagePrompt: String,
+            initialImagePath: String? = null,
+            initialPrompt: String? = null,
+            useRelay: Boolean = false,
+        ) {
+            context.startActivity(Intent(context, GeminiLivePermissionGateActivity::class.java).apply {
+                if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(EXTRA_LANGUAGE, language)
+                putExtra(EXTRA_IMAGE_PROMPT, imagePrompt)
+                initialImagePath?.let { putExtra(EXTRA_INITIAL_IMAGE, it) }
+                initialPrompt?.let { putExtra(EXTRA_INITIAL_PROMPT, it) }
+                putExtra(EXTRA_USE_RELAY, useRelay)
+            })
+        }
+    }
+}

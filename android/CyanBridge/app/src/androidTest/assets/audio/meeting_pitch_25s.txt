@@ -1,0 +1,1 @@
+Project kickoff meeting. Alice will build the API. Bob will fix glasses sync. Due Friday.

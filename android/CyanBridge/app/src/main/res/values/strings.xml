@@ -1,0 +1,101 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">System default</string>
+    <string name="language_selection_title">Choose app language</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="nav_transcriptions_recordings">Media</string>
+    <string name="text_10">BT Pair</string>
+    <string name="text_11">Register Report Listener</string>
+    <string name="text_16">Dump OTA server info</string>
+    <string name="text_17">Test pull-mode OTA (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">Keep CyanBridge Running</string>
+    <string name="battery_opt_not_supported">Battery optimization settings are not available on this Android version.</string>
+    <string name="battery_opt_cant_open_settings">Could not open settings on this device.</string>
+
+
+    <!-- Local agent automation (AccessibilityService) -->
+
+    <!-- Legacy/compat: kept for code added by local-agent-service worktree -->
+
+    <!-- Onboarding: Daily Facts -->
+    <string name="onboarding_glasses_connection_title">Connect Your Glasses</string>
+    <string name="onboarding_glasses_connection_desc">Allow CyanBridge to find and connect to your nearby glasses.</string>
+    <string name="onboarding_glasses_connection_details">Bluetooth permission is used only to discover, pair with, and communicate with your glasses. You can continue without allowing it now and grant it later when you connect a device.</string>
+
+    <string name="onboarding_optional_features_title">Optional Features, Your Choice</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent, and Pro features are optional and configured from Plugins.</string>
+    <string name="onboarding_optional_features_details">Start with glasses connection, then explore Plugins whenever you are ready. Each plugin explains what it does and requests only the permissions it needs when you enable it. You can review or turn off features at any time.</string>
+    <string name="onboarding_local_model_title">Choose Your On-Device AI</string>
+    <string name="onboarding_local_model_desc">Pick a starter model. CyanBridge will download it in the background while you finish setup.</string>
+    <string name="onboarding_local_model_details">Generation settings are selected automatically for the model and GPU acceleration is preferred. You can change or import models later in Local Models.</string>
+    <string name="onboarding_device_ram">This device: %.1f GB RAM</string>
+    <string name="onboarding_ram_warning_title">Limited memory</string>
+    <string name="onboarding_ram_limited">This device has %.1f GB RAM. Only compact local AI models are recommended; larger models may be slow or close unexpectedly.</string>
+    <string name="onboarding_ram_too_low">This device has only %.1f GB RAM. Local AI requires at least 4 GB, so no local model is currently compatible. You can continue and configure a cloud or remote provider later.</string>
+
+    <string name="onboarding_open_source_title">Welcome to CyanBridge</string>
+    <string name="onboarding_open_source_desc">Everything is ready. Connect your glasses, explore the features, and make CyanBridge yours.</string>
+    <string name="onboarding_open_source_details">CyanBridge is an open-source project built by and for the community. You can inspect the code, report issues, suggest ideas, or contribute directly through our GitHub repository.</string>
+    <string name="onboarding_bluetooth_skip_title">Continue without Bluetooth?</string>
+    <string name="onboarding_bluetooth_skip_body">You can grant this permission later. Until then, CyanBridge will not be able to find, pair with, or connect to your glasses.</string>
+    <string name="onboarding_bluetooth_skip_confirm">Continue anyway</string>
+    <string name="onboarding_bluetooth_skip_cancel">Go back</string>
+    <string name="onboarding_find_glasses">Find available glasses</string>
+
+
+    <!-- Onboarding: Screen Capture -->
+    <string name="onboarding_accessibility_disclosure_title">Accessibility access disclosure</string>
+    <string name="onboarding_accessibility_disclosure_body">CyanBridge has no Accessibility service of its own. Screen Memory and the Local Agent work through Tasker and AutoInput: AutoInput\'s Accessibility service reads the text and interface structure of the app on your screen and lets the Local Agent tap, type, scroll, and navigate on your behalf. You enable AutoInput\'s Accessibility yourself; CyanBridge never turns it on. Screen content for Screen Memory is stored locally. When you ask the Local Agent to do something, the current screen content may be processed by the AI provider you selected, including a cloud provider if you chose one. Screenshots are optional and off by default. You turn them on in the CyanBridge Local Agent Tasker profile; after that, each planning screenshot goes to the planner you selected, including a cloud or Pro planner. Apps you block in Tasker are skipped. You can turn off AutoInput\'s Accessibility, Screen Memory, or the Local Agent at any time.</string>
+    <string name="onboarding_skip_all">Skip all</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_get_started">Get started</string>
+    <string name="meta_diagnostics_title">Meta Ray-Ban diagnostics</string>
+    <string name="meta_diagnostics_description">CyanBridge will collect the recent Meta DAT state, errors, device details, and filtered logcat entries so the issue can be investigated.</string>
+    <string name="meta_pairing_title">Pair Meta glasses</string>
+
+    <!-- Onboarding: Audio Capture -->
+
+    <!-- Onboarding: Agent Personality -->
+
+    <!-- Onboarding: Local Storage -->
+
+    <!-- Onboarding: Pro Subscription -->
+
+    <!-- Chat deletion -->
+    <string name="chat_deleted">Chat deleted</string>
+    <string name="synced_media_folder_hint">Showing files from: %1$s</string>
+    <string name="synced_media_open_failed">Unable to open this media item.</string>
+    <string name="donation_intro_dialog_title">CyanBridge Asaas Support Note</string>
+    <string name="donation_intro_dialog_message">Hi, thanks for considering a donation to CyanBridge! I work on this project besides my PhD studies, and your support means a lot. I haven\'t been able to set up Stripe yet because of their special requirements for Brazilian businesses, so for now I\'m using a payment processor called Asaas. The checkout page is in Portuguese, so please use Google Translate if needed. I\'m actively looking for a better alternative. Thanks again for your support!</string>
+    <string name="donation_intro_open_button">Open Asaas Card Form</string>
+    <string name="walking_aid_title">Walking Aid</string>
+    <string name="walking_aid_settings">Walking Aid Settings</string>
+    <string name="walking_aid_general">General</string>
+    <string name="walking_aid_capture_interval">Capture interval</string>
+    <string name="walking_aid_image_recognition">Image Recognition</string>
+    <string name="walking_aid_depth_estimation">Depth Estimation</string>
+    <string name="walking_aid_output">Output</string>
+    <string name="walking_aid_tts_enabled">Speak descriptions aloud</string>
+    <string name="walking_aid_safety_disclaimer">Safety disclaimer on first warning</string>
+    <string name="walking_aid_history">Image History</string>
+    <string name="walking_aid_clear_history">Clear History</string>
+    <string name="walking_aid_source_local">Local (on-device)</string>
+    <string name="walking_aid_source_cloud">Cloud (Pro)</string>
+    <string name="walking_aid_not_connected">Walking Aid: Glasses not connected. Please connect your glasses first.</string>
+    <string name="walking_aid_meeting_active">Walking Aid: Meeting recording is active. Stop the meeting before enabling Walking Aid.</string>
+    <string name="meta_registration_channel_name">Meta glasses connection</string>
+    <string name="meta_registration_lost_title">Meta glasses disconnected</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge is no longer connected in Meta AI. Developer Mode was probably turned off. Turn it back on in Meta AI, then register again in CyanBridge.</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge is no longer connected in Meta AI. Keep Developer Mode off, then register again in CyanBridge.</string>
+    <string name="meta_registration_register_again">Register again</string>
+    <string name="voice_profile_status_none">Not enrolled. Three short phrases let CyanBridge learn your voice. Answers are not filtered yet.</string>
+    <string name="voice_profile_status_enrolled">Enrolled on %1$s. Answers are not filtered yet.</string>
+    <string name="voice_profile_status_model_ready">Voice model: %1$s (installed)</string>
+    <string name="voice_profile_status_model_missing">Voice model: %1$s (not installed yet; your phrases are kept until it is)</string>
+    <string name="voice_profile_delete_title">Delete voice profile?</string>
+    <string name="voice_profile_delete_body">This removes your recorded phrases and voice templates from this phone.</string>
+    <string name="voice_profile_delete_confirm">Delete</string>
+</resources>

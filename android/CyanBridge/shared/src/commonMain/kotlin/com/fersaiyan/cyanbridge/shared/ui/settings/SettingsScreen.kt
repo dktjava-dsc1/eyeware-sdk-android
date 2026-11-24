@@ -1,0 +1,892 @@
+package com.fersaiyan.cyanbridge.shared.ui.settings
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.fersaiyan.cyanbridge.shared.generated.resources.*
+import com.fersaiyan.cyanbridge.shared.navigation.AppDestination
+import com.fersaiyan.cyanbridge.shared.navigation.icon
+import com.fersaiyan.cyanbridge.shared.icons.imageVector
+import com.fersaiyan.cyanbridge.shared.glasses.GlassesSyncFlow
+import com.fersaiyan.cyanbridge.shared.ai.AgentProviderAvailability
+import com.fersaiyan.cyanbridge.shared.settings.AgentProviderType
+import com.fersaiyan.cyanbridge.shared.settings.CaptureSource
+import com.fersaiyan.cyanbridge.shared.settings.MemoryPrivacyMode
+import com.fersaiyan.cyanbridge.shared.settings.MemorySourceType
+import com.fersaiyan.cyanbridge.shared.settings.QuestionRoutingMode
+import com.fersaiyan.cyanbridge.shared.settings.SettingsSection
+import org.jetbrains.compose.resources.ExperimentalResourceApi
+import org.jetbrains.compose.resources.stringResource
+import com.fersaiyan.cyanbridge.shared.ui.components.ExpandableSectionCard
+import com.fersaiyan.cyanbridge.shared.ui.localizedDestinationLabel
+import com.fersaiyan.cyanbridge.shared.ui.localizedProviderLabel
+
+data class SettingsUiState(
+    val isProSubscribed: Boolean = false,
+    val proPlan: String = "Pro",
+    val appLanguageLabel: String = "System default",
+    val providerType: AgentProviderType = AgentProviderType.PRO_SUBSCRIPTION,
+    val taskerIntegrationsAvailable: Boolean = false,
+    val availableProviders: List<AgentProviderType> = AgentProviderAvailability.available(),
+    val defaultImageQuestion: String = "Give me a concise description of the image",
+    val memoryMode: MemoryPrivacyMode = MemoryPrivacyMode.PRIVATE_LOCAL,
+    val memoryModeAvailability: String = "",
+    val memorySyncStatus: String = "",
+    val memoryCloudStatus: String = "",
+    val syncExplicit: Boolean = true,
+    val syncDaily: Boolean = true,
+    val syncOcr: Boolean = false,
+    val syncDerived: Boolean = false,
+    val vaultLocked: Boolean = false,
+    val vaultRequiresPassphrase: Boolean = false,
+    val transcriptStorageEnabled: Boolean = true,
+    val redactNamesEnabled: Boolean = true,
+    val includeFullTranscriptionInExports: Boolean = false,
+    val meetingRecording: Boolean = false,
+    val meetingCaptureSource: CaptureSource? = null,
+    /** Glasses voice-question routing is Android-only for now; hosts without it leave this false. */
+    val questionRoutingAvailable: Boolean = false,
+    val questionRoutingMode: QuestionRoutingMode = QuestionRoutingMode.SMART,
+    /** SHADOW is a diagnostics mode, offered only in debug builds. */
+    val shadowRoutingAvailable: Boolean = false,
+    /** Voice enrollment is Android-only for now; hosts without it leave this false. */
+    val voiceProfileAvailable: Boolean = false,
+    val voiceProfileEnrolled: Boolean = false,
+    val voiceProfileStatus: String = "",
+    val visionAssistanceEnabled: Boolean = false,
+    /** HeyCyan Wi-Fi media sync is Android-only; hosts without it leave this false. */
+    val mediaSyncFlowAvailable: Boolean = false,
+    /** The remembered media sync flow; null asks on every Sync tap. */
+    val mediaSyncFlow: GlassesSyncFlow? = null,
+)
+
+/** Platform-owned effects stay in the platform layer; this composable only renders state and dispatches intent. */
+interface SettingsScreenActions {
+    fun onDestinationSelected(destination: AppDestination)
+    fun openAppearance()
+    fun openAppLanguageSelection()
+    fun openSubscription()
+    fun setProviderType(type: AgentProviderType)
+    fun openLocalModels()
+    fun openTaskerIntegrations() = Unit
+    fun setDefaultImageQuestion(question: String)
+    fun resetDefaultImageQuestion()
+    fun setMemoryMode(mode: MemoryPrivacyMode)
+    fun setMemorySync(source: MemorySourceType, enabled: Boolean)
+    fun deletePassiveCapture()
+    fun lockVault()
+    fun unlockVault()
+    fun setVaultPassphrase()
+    fun clearVaultPassphrase()
+    fun resetVault()
+    fun setTranscriptStorageEnabled(enabled: Boolean)
+    fun setRedactNamesEnabled(enabled: Boolean)
+    fun setIncludeFullTranscriptionEnabled(enabled: Boolean)
+    fun exportLocalData()
+    fun importLocalData()
+    fun importChatGptData()
+    fun importClaudeData()
+    fun clearLocalData()
+    fun sendDebugLogs()
+    fun stopMeetingCapture()
+    fun setQuestionRoutingMode(mode: QuestionRoutingMode) = Unit
+    fun openVoiceEnrollment() = Unit
+    fun deleteVoiceProfile() = Unit
+    fun setVisionAssistanceEnabled(enabled: Boolean) = Unit
+    fun setMediaSyncFlow(flow: GlassesSyncFlow?) = Unit
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalResourceApi::class)
+@Composable
+fun SettingsScreen(
+    state: SettingsUiState,
+    expandedSections: Set<SettingsSection>,
+    onToggleSection: (SettingsSection) -> Unit,
+    actions: SettingsScreenActions,
+    // Hosts that already draw the app-level navigation shell (iOS) pass false.
+    showNavigationBar: Boolean = true,
+) {
+    Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = stringResource(Res.string.settings_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+            )
+        },
+        bottomBar = {
+            if (showNavigationBar) NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 0.dp,
+            ) {
+                AppDestination.entries.forEach { destination ->
+                    NavigationBarItem(
+                        selected = destination == AppDestination.SETTINGS,
+                        onClick = { actions.onDestinationSelected(destination) },
+                        icon = {
+                            Icon(
+                                imageVector = destination.icon.imageVector(),
+                                contentDescription = null,
+                            )
+                        },
+                        label = { Text(localizedDestinationLabel(destination)) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                }
+            }
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                ProSubscriptionCard(
+                    isSubscribed = state.isProSubscribed,
+                    proPlan = state.proPlan,
+                    onClick = actions::openSubscription,
+                )
+            }
+            if (state.meetingRecording) {
+                item {
+                    MeetingRecordingBanner(
+                        source = state.meetingCaptureSource,
+                        onStop = actions::stopMeetingCapture,
+                    )
+                }
+            }
+            item {
+                QuickActionCard(
+                    title = stringResource(Res.string.settings_appearance),
+                    subtitle = stringResource(Res.string.settings_appearance_description),
+                    actionLabel = stringResource(Res.string.action_open),
+                    onClick = actions::openAppearance,
+                    testTag = "settings_appearance",
+                )
+            }
+            item {
+                QuickActionCard(
+                    title = stringResource(Res.string.settings_language),
+                    subtitle = stringResource(
+                        Res.string.settings_language_description,
+                        state.appLanguageLabel,
+                    ),
+                    actionLabel = stringResource(Res.string.action_change),
+                    onClick = actions::openAppLanguageSelection,
+                    testTag = "settings_language",
+                )
+            }
+            if (state.mediaSyncFlowAvailable) {
+                item {
+                    var choosing by rememberSaveable { mutableStateOf(false) }
+                    QuickActionCard(
+                        title = stringResource(Res.string.settings_media_sync),
+                        subtitle = stringResource(
+                            Res.string.settings_media_sync_description,
+                            mediaSyncFlowChoiceLabel(state.mediaSyncFlow),
+                        ),
+                        actionLabel = stringResource(Res.string.action_change),
+                        onClick = { choosing = true },
+                        testTag = "settings_media_sync",
+                    )
+                    if (choosing) {
+                        MediaSyncFlowDialog(
+                            selected = state.mediaSyncFlow,
+                            onSelect = { flow ->
+                                choosing = false
+                                actions.setMediaSyncFlow(flow)
+                            },
+                            onDismissRequest = { choosing = false },
+                        )
+                    }
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_custom_ai_provider),
+                    expanded = SettingsSection.AI_AUTOMATION in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.AI_AUTOMATION) },
+                ) {
+                    AiAutomationContent(state, actions)
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_memory_privacy),
+                    expanded = SettingsSection.MEMORY_PRIVACY in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.MEMORY_PRIVACY) },
+                ) {
+                    MemoryPrivacyContent(state, actions)
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_transcripts),
+                    expanded = SettingsSection.TRANSCRIPTS in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.TRANSCRIPTS) },
+                ) {
+                    TranscriptsContent(state, actions)
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_data),
+                    expanded = SettingsSection.DATA in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.DATA) },
+                ) {
+                    DataContent(actions)
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_accessibility),
+                    expanded = SettingsSection.ACCESSIBILITY in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.ACCESSIBILITY) },
+                ) {
+                    AccessibilityContent(state, actions)
+                }
+            }
+            item {
+                ExpandableSectionCard(
+                    title = stringResource(Res.string.settings_support),
+                    expanded = SettingsSection.SUPPORT in expandedSections,
+                    onToggle = { onToggleSection(SettingsSection.SUPPORT) },
+                ) {
+                    SupportContent(actions)
+                    // FAQ lives inside Support: description, send logs, then the questions.
+                    HorizontalDivider()
+                    Text(
+                        stringResource(Res.string.settings_faq),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    FaqContent()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MeetingRecordingBanner(
+    source: CaptureSource?,
+    onStop: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(Res.string.settings_recording_active), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = when (source) {
+                        CaptureSource.BLUETOOTH_MIC -> stringResource(Res.string.settings_bluetooth_mic)
+                        CaptureSource.PHONE_MIC -> stringResource(Res.string.settings_phone_mic)
+                        null -> stringResource(Res.string.settings_detecting_audio_source)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            TextButton(
+                onClick = onStop,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(stringResource(Res.string.action_stop))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProSubscriptionCard(
+    isSubscribed: Boolean,
+    proPlan: String,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_subscription")
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (isSubscribed) {
+                                    Res.string.settings_pro_subscription_settings
+                                } else {
+                                    Res.string.settings_pro_subscription
+                                },
+                            ),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary,
+                            shape = MaterialTheme.shapes.large,
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (isSubscribed) Res.string.settings_pro_active else Res.string.settings_pro_badge,
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Text(
+                        text = if (isSubscribed) {
+                            stringResource(Res.string.settings_current_plan, proPlan)
+                        } else {
+                            stringResource(Res.string.settings_unlock_premium)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
+            }
+            Button(
+                onClick = onClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                ),
+            ) {
+                Text(
+                    stringResource(
+                        if (isSubscribed) Res.string.settings_manage_subscription else Res.string.settings_view_plans,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionCard(
+    title: String,
+    subtitle: String,
+    actionLabel: String,
+    onClick: () -> Unit,
+    testTag: String,
+) {
+    OutlinedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(testTag)
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 88.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                actionLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalResourceApi::class)
+@Composable
+private fun AiAutomationContent(state: SettingsUiState, actions: SettingsScreenActions) {
+    Text(
+        stringResource(
+            if (AgentProviderType.TASKER in state.availableProviders) {
+                Res.string.settings_provider_description
+            } else {
+                Res.string.settings_provider_description_no_tasker
+            },
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val selectedProvider = AgentProviderAvailability.effective(state.providerType, state.availableProviders)
+    state.availableProviders.forEach { type ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable { actions.setProviderType(type) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(
+                selected = selectedProvider == type,
+                onClick = { actions.setProviderType(type) },
+            )
+            val baseLabel = localizedProviderLabel(type)
+            val label = if (type == AgentProviderType.PRO_SUBSCRIPTION && !state.isProSubscribed) {
+                "$baseLabel (Free Gemini Live)"
+            } else baseLabel
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    if (state.taskerIntegrationsAvailable) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = actions::openLocalModels,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("settings_local_models"),
+            ) {
+                Text(stringResource(Res.string.settings_configure_local_models))
+            }
+            OutlinedButton(
+                onClick = actions::openTaskerIntegrations,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("settings_tasker_integrations"),
+            ) {
+                Text("Tasker integrations")
+            }
+        }
+    } else {
+        OutlinedButton(
+            onClick = actions::openLocalModels,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(Res.string.settings_configure_local_models))
+        }
+    }
+    QuestionRoutingContent(state, actions)
+    Text(
+        text = stringResource(Res.string.image_questions_title),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+    )
+    OutlinedTextField(
+        value = state.defaultImageQuestion,
+        onValueChange = actions::setDefaultImageQuestion,
+        label = { Text(stringResource(Res.string.default_image_question)) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("default_image_question"),
+        minLines = 3,
+        maxLines = 6,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        TextButton(onClick = actions::resetDefaultImageQuestion) {
+            Text(stringResource(Res.string.reset_default_image_question))
+        }
+    }
+}
+
+@OptIn(ExperimentalResourceApi::class)
+@Composable
+private fun QuestionRoutingContent(state: SettingsUiState, actions: SettingsScreenActions) {
+    if (state.questionRoutingAvailable) {
+        Text(
+            text = stringResource(Res.string.settings_question_routing_title),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        val modes = QuestionRoutingMode.entries.filter {
+            it != QuestionRoutingMode.SHADOW || state.shadowRoutingAvailable || state.questionRoutingMode == it
+        }
+        modes.forEach { mode ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable { actions.setQuestionRoutingMode(mode) }
+                    .testTag("question_routing_${mode.name.lowercase()}"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = state.questionRoutingMode == mode,
+                    onClick = { actions.setQuestionRoutingMode(mode) },
+                )
+                Text(
+                    stringResource(
+                        when (mode) {
+                            QuestionRoutingMode.CLASSIC -> Res.string.settings_question_routing_classic
+                            QuestionRoutingMode.SHADOW -> Res.string.settings_question_routing_shadow
+                            QuestionRoutingMode.SMART -> Res.string.settings_question_routing_smart
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+    if (!state.voiceProfileAvailable) return
+    Text(
+        text = stringResource(Res.string.settings_voice_profile_title),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+    )
+    if (state.voiceProfileStatus.isNotBlank()) {
+        Text(
+            state.voiceProfileStatus,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(
+            onClick = actions::openVoiceEnrollment,
+            modifier = Modifier.weight(1f).testTag("settings_voice_enroll"),
+        ) {
+            Text(
+                stringResource(
+                    if (state.voiceProfileEnrolled) Res.string.settings_voice_profile_reenroll
+                    else Res.string.settings_voice_profile_enroll,
+                ),
+            )
+        }
+        if (state.voiceProfileEnrolled) {
+            OutlinedButton(
+                onClick = actions::deleteVoiceProfile,
+                modifier = Modifier.weight(1f).testTag("settings_voice_delete"),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) {
+                Text(stringResource(Res.string.settings_voice_profile_delete))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryPrivacyContent(state: SettingsUiState, actions: SettingsScreenActions) {
+    Text(
+        text = buildString {
+            append(
+                stringResource(
+                    Res.string.settings_vault_status,
+                    stringResource(
+                        if (state.vaultLocked) Res.string.settings_vault_locked else Res.string.settings_vault_unlocked,
+                    ),
+                ),
+            )
+            if (state.vaultRequiresPassphrase) {
+                append(' ')
+                append(stringResource(Res.string.settings_passphrase_required))
+            }
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (state.vaultLocked) {
+        ActionButton(stringResource(Res.string.settings_unlock_vault), actions::unlockVault)
+    } else {
+        ActionButton(stringResource(Res.string.settings_lock_vault), actions::lockVault)
+    }
+    ActionButton(stringResource(Res.string.settings_set_vault_passphrase), actions::setVaultPassphrase)
+    ActionButton(stringResource(Res.string.settings_clear_vault_passphrase), actions::clearVaultPassphrase)
+    ActionButton(stringResource(Res.string.settings_reset_memory_vault), actions::resetVault, destructive = true)
+    HorizontalDivider()
+    ActionButton(stringResource(Res.string.settings_delete_passive_ocr), actions::deletePassiveCapture, destructive = true)
+}
+
+@Composable
+private fun TranscriptsContent(state: SettingsUiState, actions: SettingsScreenActions) {
+    SwitchRow(
+        label = stringResource(Res.string.settings_store_transcripts),
+        checked = state.transcriptStorageEnabled,
+        onCheckedChange = actions::setTranscriptStorageEnabled,
+    )
+    SwitchRow(
+        label = stringResource(Res.string.settings_redact_names),
+        checked = state.redactNamesEnabled,
+        onCheckedChange = actions::setRedactNamesEnabled,
+    )
+    SwitchRow(
+        stringResource(Res.string.settings_full_transcription_exports),
+        state.includeFullTranscriptionInExports,
+        onCheckedChange = actions::setIncludeFullTranscriptionEnabled,
+    )
+}
+
+@Composable
+private fun DataContent(actions: SettingsScreenActions) {
+    Text(
+        text = stringResource(Res.string.settings_data_description),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ActionButton(stringResource(Res.string.settings_export_local_data), actions::exportLocalData)
+    ActionButton(stringResource(Res.string.settings_import_local_data), actions::importLocalData)
+    HorizontalDivider()
+    Text("Import AI conversation history", style = MaterialTheme.typography.titleSmall)
+    ActionButton("Import ChatGPT data", actions::importChatGptData)
+    ActionButton("Import Claude data", actions::importClaudeData)
+    ActionButton(stringResource(Res.string.settings_clear_local_data), actions::clearLocalData, destructive = true)
+}
+
+@Composable
+private fun AccessibilityContent(state: SettingsUiState, actions: SettingsScreenActions) {
+    // One toggleable row, so screen readers read the label, description and switch state together.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .testTag("settings_vision_assistance")
+            .toggleable(
+                value = state.visionAssistanceEnabled,
+                role = Role.Switch,
+                onValueChange = actions::setVisionAssistanceEnabled,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(stringResource(Res.string.settings_vision_assistance), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                stringResource(Res.string.settings_vision_assistance_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = state.visionAssistanceEnabled, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun SupportContent(actions: SettingsScreenActions) {
+    Text(
+        text = stringResource(Res.string.settings_support_description),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ActionButton(stringResource(Res.string.settings_send_debug_logs), actions::sendDebugLogs)
+}
+
+@Composable
+private fun FaqContent() {
+    val items = listOf(
+        stringResource(Res.string.settings_faq_local_models_question) to stringResource(Res.string.settings_faq_local_models_answer),
+        stringResource(Res.string.settings_faq_subscription_question) to stringResource(Res.string.settings_faq_subscription_answer),
+        stringResource(Res.string.settings_faq_data_question) to stringResource(Res.string.settings_faq_data_answer),
+        stringResource(Res.string.settings_faq_source_question) to stringResource(Res.string.settings_faq_source_answer),
+    )
+    items.forEach { (question, answer) ->
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(question, style = MaterialTheme.typography.titleSmall)
+            Text(
+                answer,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(
+    label: String,
+    subtitle: String? = null,
+    trailing: @Composable () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            subtitle?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        trailing()
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+    }
+}
+
+@Composable
+private fun ActionButton(
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        )
+    }
+}

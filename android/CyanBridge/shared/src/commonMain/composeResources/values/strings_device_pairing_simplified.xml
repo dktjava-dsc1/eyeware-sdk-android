@@ -1,0 +1,8 @@
+<resources>
+    <string name="device_bind_auto_camera_glasses">HeyCyan / EyeVue / TuneBuds / MoYoung</string>
+    <string name="device_bind_auto_camera_glasses_hint">Choose the protocol manually on the next screen</string>
+    <string name="device_bind_unnamed_device">Bluetooth device</string>
+    <string name="device_bind_signal">Signal: %1$d dBm</string>
+    <string name="device_bind_manual_protocol_title">Choose glasses protocol</string>
+    <string name="device_bind_manual_protocol_hint">Select the exact protocol for this device. You can re-pair to change it.</string>
+</resources>

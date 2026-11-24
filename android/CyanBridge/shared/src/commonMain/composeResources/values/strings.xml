@@ -1,0 +1,87 @@
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_description">App language: %1$s</string>
+    <string name="action_change">Change</string>
+    <string name="action_close">Close</string>
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_connect">Connect</string>
+    <string name="device_bind_title">Connect glasses</string>
+    <string name="device_bind_scan">Scan for devices</string>
+    <string name="device_bind_pair_meta">Pair Meta Glasses</string>
+    <string name="device_bind_scanning">Scanning...</string>
+    <string name="device_bind_looking">Looking for named Bluetooth devices...</string>
+    <string name="device_bind_empty">No devices found. Start a scan to pair your glasses.</string>
+    <string name="device_bind_select_type">Select glasses type</string>
+    <string name="image_questions_title">AI Image Questions</string>
+    <string name="default_image_question">Default image question</string>
+    <string name="reset_default_image_question">Reset to default</string>
+    <string name="plugin_select">Select %1$s</string>
+    <string name="plugin_selected">Selected</string>
+    <string name="native_plugins_section">Native Plugins</string>
+
+    <!-- First-run onboarding -->
+    <string name="onboarding_language_title">Choose your app language</string>
+    <string name="onboarding_language_selector_label">Language</string>
+    <string name="onboarding_welcome_title">Your glasses. One intelligent bridge.</string>
+    <string name="onboarding_welcome_body">Connect, capture and turn everyday moments into useful memories—with privacy and control built in.</string>
+    <string name="onboarding_start_setup">Get started</string>
+    <string name="onboarding_benefit_bridge_title">One bridge</string>
+    <string name="onboarding_benefit_bridge_body">Connect supported smart glasses in one place.</string>
+    <string name="onboarding_benefit_ai_title">AI that stays close</string>
+    <string name="onboarding_benefit_ai_body">Use local intelligence and keep control of your data.</string>
+    <string name="onboarding_benefit_capture_title">Capture the moment</string>
+    <string name="onboarding_benefit_capture_body">Move photos, audio and ideas into useful memories.</string>
+    <string name="onboarding_duration_note">About 2 minutes · You stay in control</string>
+    <string name="onboarding_bluetooth_allowed">Bluetooth access is allowed</string>
+    <string name="onboarding_bluetooth_denied">Bluetooth access has not been granted</string>
+    <string name="onboarding_allow_glasses_connection">Allow glasses connection</string>
+    <string name="onboarding_file_access_allowed">File access is allowed</string>
+    <string name="onboarding_file_access_denied">File access has not been granted</string>
+    <string name="onboarding_allow_media_access">Allow media and AI file access</string>
+    <string name="onboarding_open_github">Open CyanBridge on GitHub</string>
+    <string name="onboarding_back">Back</string>
+
+    <!-- Battery onboarding -->
+    <string name="onboarding_battery_headline">Keep CyanBridge running</string>
+    <string name="onboarding_battery_body">Android battery optimization can interrupt Bluetooth, media sync, local automation, and meeting capture.</string>
+    <string name="onboarding_battery_disabled">Battery optimization is disabled for CyanBridge.</string>
+    <string name="onboarding_battery_enabled">Battery optimization is currently enabled for CyanBridge.</string>
+    <string name="onboarding_disable_battery">Disable battery optimization</string>
+    <string name="onboarding_battery_list">Open battery optimization list</string>
+    <string name="onboarding_lock_recents_title">Lock CyanBridge in Recents</string>
+    <string name="onboarding_lock_recents_body">Some phones also stop background work when an app is swiped away. Open Recents, find CyanBridge, then use your phone's Lock, Keep open, Pin, or Don't optimize option. The name varies by manufacturer.</string>
+    <string name="onboarding_open_app_info">Open app info for app-lock controls</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_not_now">Not now</string>
+    <string name="onboarding_dont_show_again">Don't show this again</string>
+
+    <!-- Meta Ray-Ban diagnostics -->
+    <string name="meta_rayban_title">Meta Ray-Ban</string>
+    <string name="meta_rayban_device_summary">Device: %1$s (%2$d available)</string>
+    <string name="meta_rayban_no_device">No DAT device</string>
+    <string name="meta_rayban_registration_status">Registration: %1$s</string>
+    <string name="meta_setup_choice_title">How do you connect to Meta AI?</string>
+    <string name="meta_setup_choice_dev_mode">I use Developer Mode</string>
+    <string name="meta_setup_choice_dev_mode_detail">For people who already turned on Developer Mode in the Meta AI app.</string>
+    <string name="meta_setup_choice_email">Request access with my Meta email</string>
+    <string name="meta_setup_choice_email_detail">CyanBridge adds your Meta account to its testers, and Meta emails you an invite.</string>
+    <string name="meta_setup_choice_email_unavailable">Access by email is not available in this version yet. Use Developer Mode.</string>
+    <string name="meta_setup_dev_step_1">1. In Meta AI, open Settings, then App info.</string>
+    <string name="meta_setup_dev_step_2">2. Tap the app version 5 times (with a screen reader, double-tap it 5 times), then turn on Developer Mode.</string>
+    <string name="meta_setup_dev_step_3">3. Return here and tap Register.</string>
+    <string name="meta_setup_email_step_1">1. Open the access form and enter the email of your Meta account.</string>
+    <string name="meta_setup_email_step_2">2. When you are accepted, open Meta’s invite email and accept it.</string>
+    <string name="meta_setup_email_step_3">3. In Meta AI, turn Developer Mode off. With it on, CyanBridge connects without release features such as “Hey Meta, open …”.</string>
+    <string name="meta_setup_email_step_4">4. Return here and tap Register.</string>
+    <string name="meta_setup_open_form">Open the access form</string>
+    <string name="meta_setup_register">Register</string>
+    <string name="meta_setup_register_again">Register again</string>
+    <string name="meta_setup_dev_mode_lost">CyanBridge is no longer connected in Meta AI. Developer Mode was probably turned off. Turn it back on in Meta AI, then tap Register again.</string>
+    <string name="meta_setup_disconnected_invite">CyanBridge is no longer connected in Meta AI. Keep Developer Mode off and tap Register again.</string>
+    <string name="meta_setup_invited_on_dev_path">You are connected through Developer Mode. For “Hey Meta, open …” voice launch, turn Developer Mode off in Meta AI, then tap Register again here.</string>
+    <string name="meta_setup_path_label">Meta AI connection: %1$s</string>
+    <string name="meta_setup_path_developer_mode">Developer Mode</string>
+    <string name="meta_setup_path_release_channel">invited tester (release channel)</string>
+</resources>

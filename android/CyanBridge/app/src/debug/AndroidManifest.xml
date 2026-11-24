@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug-only deterministic target used by emulator and physical Tasker HIL tests. -->
+        <activity
+            android:name=".hil.HilFixtureActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="CyanBridge HIL Fixture" />
+        <!-- Receives only an allowlisted profile filename staged by the lab runner in cache/. -->
+        <activity
+            android:name=".hil.HilTaskerProfileImportActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="CyanBridge HIL Tasker Import" />
+        <!-- add.219 debug-only: arm/disarm the glasses BLE->TCP sim bridge over adb. -->
+        <receiver
+            android:name=".glassessim.GlassesSimBridgeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.fersaiyan.cyanbridge.debug.SIM_BRIDGE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

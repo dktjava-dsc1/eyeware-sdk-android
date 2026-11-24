@@ -1,0 +1,83 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">시스템 기본값</string>
+    <string name="language_selection_title">앱 언어 선택</string>
+    <string name="action_cancel">취소</string>
+    <string name="action_save">저장</string>
+    <string name="nav_transcriptions_recordings">미디어</string>
+    <string name="text_10">Bluetooth 페어링</string>
+    <string name="text_11">보고서 리스너 등록</string>
+    <string name="text_16">OTA 서버 정보 내보내기</string>
+    <string name="text_17">풀 모드 OTA 테스트 (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">CyanBridge 계속 실행</string>
+    <string name="battery_opt_not_supported">이 Android 버전에서는 배터리 최적화 설정을 사용할 수 없습니다.</string>
+    <string name="battery_opt_cant_open_settings">이 기기에서 설정을 열 수 없습니다.</string>
+
+
+
+    <string name="onboarding_glasses_connection_title">안경 연결</string>
+    <string name="onboarding_glasses_connection_desc">CyanBridge가 주변 안경을 찾고 연결하도록 허용합니다.</string>
+    <string name="onboarding_glasses_connection_details">Bluetooth 권한은 안경을 검색하고 페어링하며 통신하는 데만 사용됩니다. 지금 허용하지 않고 계속 진행한 후 기기 연결 시 나중에 허용할 수 있습니다.</string>
+    <string name="onboarding_optional_features_title">선택 기능, 원하는 대로 선택</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent 및 Pro 기능은 선택 사항이며 플러그인에서 설정합니다.</string>
+    <string name="onboarding_optional_features_details">먼저 안경을 연결한 다음 준비되면 플러그인을 살펴보세요. 각 플러그인은 기능을 설명하고 활성화할 때 필요한 권한만 요청합니다. 언제든지 기능을 검토하거나 끌 수 있습니다.</string>
+    <string name="onboarding_local_model_title">온디바이스 AI 선택</string>
+    <string name="onboarding_local_model_desc">시작 모델을 선택하세요. 설정을 마치는 동안 CyanBridge가 백그라운드에서 다운로드합니다.</string>
+    <string name="onboarding_local_model_details">모델에 맞는 생성 설정이 자동으로 선택되며 GPU 가속이 우선됩니다. 나중에 로컬 모델에서 모델을 변경하거나 가져올 수 있습니다.</string>
+
+    <string name="onboarding_open_source_title">공개적으로 만들어 가는 앱</string>
+    <string name="onboarding_open_source_desc">코드를 검토하고 문제를 신고하며 모두를 위한 CyanBridge 개선에 참여하세요.</string>
+    <string name="onboarding_open_source_details">CyanBridge는 오픈 소스입니다. 동작을 이해하기 위해 코드를 확인하고 버그나 보안 문제를 신고하거나 개선 사항을 제안하거나 GitHub를 통해 기여할 수 있습니다.</string>
+
+
+    <string name="onboarding_accessibility_disclosure_title">접근성 액세스 안내</string>
+    <string name="onboarding_accessibility_disclosure_body">CyanBridge에는 자체 접근성 서비스가 없습니다. 화면 기억과 로컬 에이전트는 Tasker와 AutoInput을 통해 작동합니다. AutoInput의 접근성 서비스가 화면에 표시된 앱의 텍스트와 인터페이스 구조를 읽고, 로컬 에이전트가 사용자를 대신해 탭하고, 입력하고, 스크롤하고, 탐색하도록 합니다. AutoInput 접근성은 사용자가 직접 활성화하며 CyanBridge는 절대 자동으로 켜지 않습니다. 화면 콘텐츠는 화면 기억을 위해 로컬에 저장됩니다. 로컬 에이전트에 작업을 요청하면 현재 화면 콘텐츠가 선택한 AI 제공업체에서 처리될 수 있으며, 클라우드 제공업체를 선택한 경우 해당 업체가 포함될 수 있습니다. 스크린샷은 선택 사항이며 기본적으로 꺼져 있습니다. CyanBridge Local Agent Tasker 프로필에서 켤 수 있으며, 켠 뒤에는 각 계획 스크린샷이 선택한 플래너로 전송됩니다. 클라우드 또는 Pro 플래너도 포함됩니다. Tasker에서 차단한 앱은 건너뜁니다. 언제든지 AutoInput 접근성, 화면 기억 또는 로컬 에이전트를 끌 수 있습니다.</string>
+    <string name="onboarding_skip_all">모두 건너뛰기</string>
+    <string name="onboarding_back">뒤로</string>
+    <string name="onboarding_next">다음</string>
+    <string name="onboarding_get_started">시작하기</string>
+    <string name="meta_diagnostics_title">Meta Ray-Ban 진단</string>
+    <string name="meta_diagnostics_description">문제 조사를 위해 CyanBridge가 최근 Meta DAT 상태, 오류, 기기 세부 정보 및 필터링된 logcat 항목을 수집합니다.</string>
+    <string name="meta_pairing_title">Meta 안경 페어링</string>
+
+
+
+
+
+    <string name="chat_deleted">채팅이 삭제됨</string>
+    <string name="synced_media_folder_hint">다음 폴더의 파일 표시: %1$s</string>
+    <string name="synced_media_open_failed">이 미디어 항목을 열 수 없습니다.</string>
+
+    <string name="donation_intro_dialog_title">CyanBridge Asaas 후원 안내</string>
+    <string name="donation_intro_dialog_message">안녕하세요. CyanBridge 후원을 고려해 주셔서 감사합니다! 저는 박사 과정 공부와 함께 이 프로젝트를 진행하고 있으며 여러분의 후원이 큰 의미가 있습니다. 브라질 기업에 대한 Stripe의 특별 요구 사항 때문에 아직 Stripe를 설정하지 못해 현재는 Asaas라는 결제 처리업체를 사용하고 있습니다. 결제 페이지는 포르투갈어로 제공되므로 필요한 경우 Google 번역을 사용해 주세요. 더 나은 대안을 적극적으로 찾고 있습니다. 다시 한번 후원해 주셔서 감사합니다!</string>
+    <string name="donation_intro_open_button">Asaas 카드 양식 열기</string>
+
+    <string name="walking_aid_title">걷기 보조</string>
+    <string name="walking_aid_settings">걷기 보조 설정</string>
+    <string name="walking_aid_general">일반</string>
+    <string name="walking_aid_capture_interval">캡처 간격</string>
+    <string name="walking_aid_image_recognition">이미지 인식</string>
+    <string name="walking_aid_depth_estimation">깊이 추정</string>
+    <string name="walking_aid_output">출력</string>
+    <string name="walking_aid_tts_enabled">설명을 소리 내어 읽기</string>
+    <string name="walking_aid_safety_disclaimer">첫 경고 시 안전 고지</string>
+    <string name="walking_aid_history">이미지 기록</string>
+    <string name="walking_aid_clear_history">기록 삭제</string>
+    <string name="walking_aid_source_local">로컬 (기기 내)</string>
+    <string name="walking_aid_source_cloud">클라우드 (Pro)</string>
+    <string name="walking_aid_not_connected">걷기 보조: 안경이 연결되지 않았습니다. 먼저 안경을 연결하세요.</string>
+    <string name="walking_aid_meeting_active">걷기 보조: 회의 녹음이 활성화되어 있습니다. 걷기 보조를 사용 설정하기 전에 회의를 중지하세요.</string>
+    <string name="meta_registration_channel_name">Meta 안경 연결</string>
+    <string name="meta_registration_lost_title">Meta 안경 연결 끊김</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge가 더 이상 Meta AI에 연결되어 있지 않습니다. 개발자 모드가 꺼진 것 같습니다. Meta AI에서 다시 켠 다음 CyanBridge에서 다시 등록하세요.</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge가 더 이상 Meta AI에 연결되어 있지 않습니다. 개발자 모드를 끈 상태로 두고 CyanBridge에서 다시 등록하세요.</string>
+    <string name="meta_registration_register_again">다시 등록</string>
+    <string name="voice_profile_status_none">등록되지 않음. 짧은 문장 세 개로 CyanBridge가 내 목소리를 익힙니다. 아직 답변을 걸러내지 않습니다.</string>
+    <string name="voice_profile_status_enrolled">%1$s에 등록됨. 아직 답변을 걸러내지 않습니다.</string>
+    <string name="voice_profile_status_model_ready">음성 모델: %1$s (설치됨)</string>
+    <string name="voice_profile_status_model_missing">음성 모델: %1$s (아직 설치되지 않음, 설치될 때까지 녹음한 문장을 보관합니다)</string>
+    <string name="voice_profile_delete_title">음성 프로필을 삭제할까요?</string>
+    <string name="voice_profile_delete_body">이 휴대폰에서 녹음한 문장과 음성 템플릿이 삭제됩니다.</string>
+    <string name="voice_profile_delete_confirm">삭제</string>
+</resources>

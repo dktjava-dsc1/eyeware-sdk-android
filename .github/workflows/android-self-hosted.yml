@@ -1,0 +1,159 @@
+name: Android self-hosted CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/android-self-hosted.yml
+      - android/**
+      - heycyan-core/**
+      - tools/hil/**
+      - .gitmodules
+      - README.md
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: android-self-hosted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android build, unit, and emulator tests
+    if: github.repository == 'FerSaiyan/Alternative-HeyCyan-App-and-SDK'
+    runs-on: [self-hosted, linux, x64, homelab]
+    timeout-minutes: 90
+    env:
+      # Every emulator step (and run_instrumentation.sh's offline recovery) uses this instance.
+      CYANBRIDGE_HIL_EMULATOR_AVD: ${{ vars.CYANBRIDGE_HIL_EMULATOR_AVD || 'Pixel_9a' }}
+      CYANBRIDGE_HIL_EMULATOR_PORT: '5584'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        env:
+          # The Android build no longer requires Moonshine/LFS assets. Keep automatic
+          # smudging disabled so unrelated LFS content cannot slow persistent runners.
+          GIT_LFS_SKIP_SMUDGE: '1'
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Verify local Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "x86_64"
+          command -v python3 >/dev/null
+          test -x /opt/android-studio/jbr/bin/java
+          test -d "$HOME/Android/Sdk/platforms/android-35"
+          test -x "$HOME/Android/Sdk/platform-tools/adb"
+          {
+            printf 'JAVA_HOME=/opt/android-studio/jbr\n'
+            printf 'ANDROID_HOME=%s\n' "$HOME/Android/Sdk"
+            printf 'ANDROID_SDK_ROOT=%s\n' "$HOME/Android/Sdk"
+            printf '%s\n' "$HOME/Android/Sdk/platform-tools" >> "$GITHUB_PATH"
+          } >> "$GITHUB_ENV"
+          /opt/android-studio/jbr/bin/java -version
+          "$HOME/Android/Sdk/platform-tools/adb" version
+
+      - name: Verify Meta SDK credential
+        env:
+          META_GITHUB_TOKEN: ${{ secrets.META_GITHUB_TOKEN }}
+        run: test -n "$META_GITHUB_TOKEN"
+
+      - name: Validate Tasker integration contracts
+        run: python3 tools/hil/validate_tasker_profiles.py
+
+      - name: Run Android and shared tests
+        env:
+          META_GITHUB_TOKEN: ${{ secrets.META_GITHUB_TOKEN }}
+        working-directory: android/CyanBridge
+        run: >-
+          ./gradlew --no-daemon --stacktrace
+          :app:testDebugUnitTest
+          :shared:portabilityTest
+
+      - name: Assemble debug and instrumentation APKs
+        env:
+          META_GITHUB_TOKEN: ${{ secrets.META_GITHUB_TOKEN }}
+        working-directory: android/CyanBridge
+        run: >-
+          ./gradlew --no-daemon --stacktrace
+          -PtestAbi=x86_64
+          :app:assembleDebug
+          :app:assembleDebugAndroidTest
+
+      # CI runs every emulator step on its own -read-only instance of the persistent automation AVD
+      # (Pixel_9a) on port 5584. Changes inside it are discarded on exit, so the persistent phone's
+      # account, Tasker setup and release-signed app stay intact, and a running user emulator is
+      # never reused or stopped.
+      - name: Start read-only CI emulator
+        id: emulator
+        shell: bash
+        env:
+          CYANBRIDGE_HIL_DISABLE_PLAY_STORE: 'true'
+        run: |
+          set -euo pipefail
+          serial="$(bash tools/hil/start_emulator.sh)"
+          test -n "$serial"
+          test "$(adb -s "$serial" get-state)" = "device"
+          echo "serial=$serial" >> "$GITHUB_OUTPUT"
+
+      - name: Install branch build on the read-only emulator
+        env:
+          # The persistent AVD holds a release-signed app; CI builds carry the debug key.
+          CYANBRIDGE_HIL_UNINSTALL_ON_SIGNATURE_MISMATCH: 'true'
+        run: bash tools/hil/install.sh '${{ steps.emulator.outputs.serial }}'
+
+      - name: Run Mock DAT, Meta pairing, and Walking Aid video controls
+        run: >-
+          bash tools/hil/run_instrumentation.sh
+          '${{ steps.emulator.outputs.serial }}'
+          emulator
+          com.fersaiyan.cyanbridge.devices.metarayban.MetaDatLifecycleTest,com.fersaiyan.cyanbridge.devices.metarayban.MetaDatSdkMockTest,com.fersaiyan.cyanbridge.ui.MetaPairingMockFlowTest,com.fersaiyan.cyanbridge.ui.MetaPairingScreenTest,com.fersaiyan.cyanbridge.plugins.walkingaid.WalkingAidVideoSourceButtonsTest,com.fersaiyan.cyanbridge.plugins.walkingaid.WalkingAidVideoCaptureLifecycleTest
+
+      - name: Run hermetic audio instrumentation
+        run: >-
+          bash tools/hil/run_instrumentation.sh
+          '${{ steps.emulator.outputs.serial }}'
+          emulator
+          com.fersaiyan.cyanbridge.hil.audio.AudioEmulatorHarnessTest#assets_AllThreeFixturesExist,com.fersaiyan.cyanbridge.hil.audio.AudioEmulatorHarnessTest#meetingTranscriptionFromSeededAsset_hermetic,com.fersaiyan.cyanbridge.hil.audio.AudioEmulatorHarnessTest#handsFreeTranslator_fromAssetTranscript,com.fersaiyan.cyanbridge.hil.audio.AudioEmulatorHarnessTest#geminiLive_pcmInjectionDoesNotCrash
+
+      - name: Run Walking Aid real models and glasses video streams on emulator
+        env:
+          WALKING_AID_CI_CACHE_DIR: ${{ runner.temp }}/../cyanbridge-model-cache/walking-aid
+        run: bash tools/hil/run_walking_aid_model_ci.sh '${{ steps.emulator.outputs.serial }}'
+
+      - name: Stop the read-only CI emulator
+        if: always()
+        shell: bash
+        run: |
+          adb="$HOME/Android/Sdk/platform-tools/adb"
+          if [ "$("$adb" -s emulator-5584 get-state 2>/dev/null || true)" = "device" ]; then
+            "$adb" -s emulator-5584 emu kill || true
+          fi
+
+      # Artifact uploads are copies for people, not checks: a full artifact quota (as on 2026-11-12,
+      # "Artifact storage quota has been hit") must not turn a green build and emulator run red.
+      - name: Upload Walking Aid model diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: walking-aid-model-results-${{ github.sha }}
+          path: build/hil/results/walking-aid-model-ci/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload debug APK
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyanbridge-debug-apk
+          path: android/CyanBridge/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          # ~220 MB per run; the default 90 days filled the account's artifact storage.
+          retention-days: 7

@@ -1,0 +1,76 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">Predefinito di sistema</string>
+    <string name="language_selection_title">Scegli la lingua dell\'app</string>
+    <string name="action_cancel">Annulla</string>
+    <string name="action_save">Salva</string>
+    <string name="walking_aid_title">Ausilio per la Camminata</string>
+    <string name="walking_aid_settings">Impostazioni Ausilio per la Camminata</string>
+    <string name="walking_aid_general">Generale</string>
+    <string name="walking_aid_capture_interval">Intervallo di acquisizione</string>
+    <string name="walking_aid_image_recognition">Riconoscimento Immagine</string>
+    <string name="walking_aid_depth_estimation">Stima Profondità</string>
+    <string name="walking_aid_output">Uscita</string>
+    <string name="walking_aid_tts_enabled">Leggi descrizioni ad alta voce</string>
+    <string name="walking_aid_safety_disclaimer">Avviso di sicurezza al primo avvertimento</string>
+    <string name="walking_aid_history">Cronologia Immagini</string>
+    <string name="walking_aid_clear_history">Cancella Cronologia</string>
+    <string name="walking_aid_source_local">Locale (sul dispositivo)</string>
+    <string name="walking_aid_source_cloud">Cloud (Pro)</string>
+    <string name="walking_aid_not_connected">Walking Aid: Occhiali non connessi. Collega prima i tuoi occhiali.</string>
+    <string name="walking_aid_meeting_active">Walking Aid: Registrazione riunione attiva. Ferma la riunione prima di attivare Walking Aid.</string>
+    <string name="onboarding_glasses_connection_title">Collega i tuoi occhiali</string>
+    <string name="onboarding_glasses_connection_desc">Consenti a CyanBridge di trovare e collegare gli occhiali vicini.</string>
+    <string name="onboarding_glasses_connection_details">Il permesso Bluetooth viene usato solo per trovare, associare e comunicare con gli occhiali. Puoi continuare senza concederlo ora e farlo in seguito quando colleghi un dispositivo.</string>
+    <string name="onboarding_optional_features_title">Funzioni opzionali, scegli tu</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent e le funzioni Pro sono opzionali e si configurano da Plugin.</string>
+    <string name="onboarding_optional_features_details">Inizia collegando gli occhiali, poi esplora i plugin quando vuoi. Ogni plugin spiega cosa fa e richiede solo i permessi necessari quando lo attivi. Puoi rivedere o disattivare le funzioni in qualsiasi momento.</string>
+    <string name="onboarding_open_source_title">Sviluppato apertamente</string>
+    <string name="onboarding_open_source_desc">Esamina il codice, segnala i problemi e aiuta a migliorare CyanBridge per tutti.</string>
+    <string name="onboarding_open_source_details">CyanBridge è open source. Esamina il codice per capire il comportamento, segnala bug o problemi di sicurezza, suggerisci miglioramenti o contribuisci tramite GitHub.</string>
+    <string name="onboarding_skip_all">Salta tutto</string>
+    <string name="onboarding_back">Indietro</string>
+    <string name="onboarding_next">Avanti</string>
+    <string name="onboarding_get_started">Inizia</string>
+    <string name="meta_diagnostics_title">Diagnostica Meta Ray-Ban</string>
+    <string name="meta_diagnostics_description">CyanBridge raccoglierà lo stato recente di Meta DAT, gli errori, i dettagli del dispositivo e le righe logcat filtrate per analizzare il problema.</string>
+    <string name="nav_transcriptions_recordings">Media</string>
+    <string name="text_10">Associa tramite BT</string>
+    <string name="text_11">Registra listener dei report</string>
+    <string name="text_16">Mostra informazioni del server OTA</string>
+    <string name="text_17">Prova OTA in modalità pull (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">Mantieni CyanBridge in esecuzione</string>
+    <string name="battery_opt_not_supported">Le impostazioni di ottimizzazione della batteria non sono disponibili in questa versione di Android.</string>
+    <string name="battery_opt_cant_open_settings">Impossibile aprire le impostazioni su questo dispositivo.</string>
+
+
+
+    <string name="onboarding_local_model_title">Scegli la tua IA sul dispositivo</string>
+    <string name="onboarding_local_model_desc">Scegli un modello iniziale. CyanBridge lo scaricherà in background mentre completi la configurazione.</string>
+    <string name="onboarding_local_model_details">Le impostazioni di generazione vengono selezionate automaticamente per il modello e viene privilegiata l\'accelerazione GPU. Potrai modificare o importare modelli in seguito in Modelli locali.</string>
+    <string name="onboarding_accessibility_disclosure_title">Informazioni sull\'accesso all\'accessibilità</string>
+    <string name="onboarding_accessibility_disclosure_body">CyanBridge non ha un proprio servizio di accessibilità. La Memoria dello schermo e l\'agente locale funzionano tramite Tasker e AutoInput: il servizio di accessibilità di AutoInput legge il testo e la struttura dell\'interfaccia dell\'app sullo schermo e permette all\'agente locale di toccare, digitare, scorrere e navigare per conto tuo. Sei tu ad attivare l\'accessibilità di AutoInput; CyanBridge non la attiva mai. Il contenuto dello schermo viene memorizzato localmente per la Memoria dello schermo. Quando chiedi qualcosa all\'agente locale, il contenuto attuale dello schermo può essere elaborato dal provider IA che hai scelto, incluso un provider cloud se ne hai scelto uno. Gli screenshot sono facoltativi e disattivati per impostazione predefinita. Si attivano nel profilo Tasker CyanBridge Local Agent; da quel momento ogni screenshot di pianificazione viene inviato al pianificatore scelto, incluso un pianificatore cloud o Pro. Le app che blocchi in Tasker vengono ignorate. Puoi disattivare l\'accessibilità di AutoInput, la Memoria dello schermo o l\'agente locale in qualsiasi momento.</string>
+    <string name="meta_pairing_title">Associa gli occhiali Meta</string>
+
+
+    <string name="chat_deleted">Chat eliminata</string>
+    <string name="synced_media_folder_hint">File mostrati da: %1$s</string>
+    <string name="synced_media_open_failed">Impossibile aprire questo elemento multimediale.</string>
+
+    <string name="donation_intro_dialog_title">Nota di supporto CyanBridge tramite Asaas</string>
+    <string name="donation_intro_dialog_message">Ciao, grazie per aver preso in considerazione una donazione a CyanBridge! Lavoro a questo progetto oltre ai miei studi di dottorato e il tuo supporto significa molto per me. Non ho ancora potuto configurare Stripe a causa dei suoi requisiti speciali per le aziende brasiliane, quindi per ora uso un elaboratore di pagamenti chiamato Asaas. La pagina di pagamento è in portoghese; usa Google Traduttore se necessario. Sto cercando attivamente un\'alternativa migliore. Grazie ancora per il tuo supporto!</string>
+    <string name="donation_intro_open_button">Apri il modulo della carta Asaas</string>
+    <string name="meta_registration_channel_name">Connessione degli occhiali Meta</string>
+    <string name="meta_registration_lost_title">Occhiali Meta scollegati</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge non è più collegato in Meta AI. Probabilmente la modalità sviluppatore è stata disattivata. Riattivala in Meta AI, poi registra di nuovo CyanBridge.</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge non è più collegato in Meta AI. Lascia disattivata la modalità sviluppatore, poi registra di nuovo CyanBridge.</string>
+    <string name="meta_registration_register_again">Registra di nuovo</string>
+    <string name="voice_profile_status_none">Non registrato. Tre frasi brevi permettono a CyanBridge di imparare la tua voce. Le risposte non vengono ancora filtrate.</string>
+    <string name="voice_profile_status_enrolled">Registrato il %1$s. Le risposte non vengono ancora filtrate.</string>
+    <string name="voice_profile_status_model_ready">Modello vocale: %1$s (installato)</string>
+    <string name="voice_profile_status_model_missing">Modello vocale: %1$s (non ancora installato; le tue frasi vengono conservate fino ad allora)</string>
+    <string name="voice_profile_delete_title">Eliminare il profilo vocale?</string>
+    <string name="voice_profile_delete_body">Verranno rimossi da questo telefono le frasi registrate e i modelli della tua voce.</string>
+    <string name="voice_profile_delete_confirm">Elimina</string>
+</resources>

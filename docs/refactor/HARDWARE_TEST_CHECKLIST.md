@@ -1,0 +1,799 @@
+# cyan-refactor hardware test checklist
+
+Phase 1 (MainActivity extraction, GeminiLiveClient and LocalAgentService splits, plugin adapter removal) was meant to keep behavior the same. A pixel comparison on an emulator showed identical screens. Phase 2 changes behavior on hardware paths on purpose. This list covers every change that has to be checked with real glasses or earbuds.
+
+## Phase 1 flows to smoke-test
+
+These moved without logic changes, but only JVM tests and screenshots cover them so far:
+
+- **HeyCyan media sync.** Official and adaptive flows. JPG/MP4/Opus land in the gallery and Recordings. The exit-transfer command is sent. BT loss mid-sync.
+- **High-quality image question.** Success, then each failure-dialog choice (Retry / Fast preview / Cancel).
+- **Eyevue, TuneBuds and W620 sync.** Stop and close the Activity while each one is syncing.
+- **OTA.** Personal two-step picker, catalog OTA (stealth and debug), the combined OTA reconnect, BT loss during preparation and during the OTA, and the dashboard Cancel.
+- **Live preview.** HeyCyan, Eyevue and TuneBuds. The notification Stop action.
+- **Gemini Live.** Audio route, SCO and focus; reconnect and resumption; free and economy 429/402 handling.
+- **Local Agent.** TTS, the approval flow, read-screen-aloud, and stop on screen-off.
+- **Pro settings and subscription.** Plan selection after rotation.
+- **Android 10.** Top-bar inset on the plugin settings screens.
+
+## Phase 2: unified glasses network session
+
+Filter logcat with:
+`adb logcat -s GlassesNetSession DataDownload OtaManager LivePreview WifiP2pManagerSingleton EyevueWifi TuneBudsP2p TuneBudsMediaSync WifiAdbDebug`
+
+**Every teardown**
+- Expect `"<client>: group removal accepted on attempt 1; waiting for disconnect"`, then `"confirmed the group is gone"` or `"…confirmed by a disconnect event"`.
+- New: removal that can't be confirmed is retried while quarantined (`"…retrying every 5000ms or on Bluetooth reconnect"`). Before, media sync and live preview stayed stuck until a BT disconnect.
+
+**HeyCyan adaptive sync**
+1. Normal sync looks the same. The transfer-mode command now goes out one main-loop hop later, after the link claim.
+2. With a VPN on, process binding is now attempted (`"VPN active — attempting bindProcessToNetwork"`). Check that media.config still resolves, and that app internet works after the sync.
+3. Stop and immediately sync again. The second sync may wait for the first one's teardown (`"waiting for HeyCyan media sync to finish its link teardown"`).
+4. Error 255 is still left to adaptive recovery.
+
+**HeyCyan official sync**
+- Peer selection is unchanged. Error 255 still stops, resets and shows a toast.
+- New: if the link can't be claimed within 15 s, the toast says "Wi-Fi Direct is still busy with another glasses session. Please retry sync."
+
+**OTA Wi-Fi stage**
+- The peer matcher is broader: official name, full MAC suffix, case-insensitive name and MAC, AVAILABLE peers first. Check that `"Found glasses P2P peer"` names your glasses.
+- Expect `TEARING_DOWN_P2P`, then `"Confirmed OTA P2P group is gone"`, then BLE DFU. The 25 s stage limit is unchanged.
+
+**HeyCyan live preview**
+- The peer matcher adds the `_<last4>` rule. Route lookup also accepts 192.168.49.x.
+- On stop, the lease is released only after `"cleanup: confirmed P2P group is gone"`.
+
+**Eyevue (P2P models)**
+- `disconnect()` now waits for a confirmed, retried removal and closes the channel, and the next connect waits for it.
+- VPN networks are excluded from route selection.
+- AP models now bind through the coordinator.
+
+**TuneBuds media sync (P2P mode)**
+- `close()` now waits for a confirmed removal, up to about 17 s, before `"TuneBuds P2P group teardown timed out"`. It used to wait 5 s and treat a failure as done, so the hotspot fallback can now start later.
+
+**BT loss mid-session**
+- Media sync, live preview and Wi-Fi ADB abandon the link as before.
+- The next HeyCyan session first removes the leftover group (`"removing a group left by an abandoned link before connecting"`).
+- OTA keeps the lease and retries every 5 s, and immediately on reconnect.
+
+**VPN on/off**
+- Expect `"process bound to the glasses network"` / `"restored the default process network"`. AI requests must work after any session.
+
+## Phase 2: per-family glasses devices (shared `GlassesDevice` / `GlassesFamilyProfile`)
+
+Dashboard dispatch was ported one-to-one. Families without their own transport still go through the hidden HeyCyan controls, as before. The intended changes only affect controls the dashboard already hides for that family.
+
+**Every family**
+- Scan, Reconnect and Disconnect behave as before.
+- Status line, battery and storage update.
+- Dashboard sections are unchanged after switching profiles in Device Bind.
+
+**HeyCyan**
+- Photo, video, audio, Count, Sync and Stop sync.
+- Live preview start and stop.
+- Advanced: battery toast, version, time, volume, Add listener, BT scan, and OTA dump, pull, request and cancel.
+- Image quality picker and wake-word route.
+- Wi-Fi ADB in a debug build.
+- Battery polling every 60 s.
+- Tasker `camera` and `data_download`.
+- Plugin shortcut SYNC.
+
+**Eyevue**
+- Photo, video and audio toggles. The Count toast ("Media count: N").
+- Sync and stop.
+- Live preview start and stop, the notification Stop, and the lease released afterwards.
+- Battery toast and battery request on selection.
+- Volume, Add listener, wearing toggle.
+- Wake-word route.
+- Closing the activity mid-sync finishes the transfer and disconnects.
+
+**TuneBuds**
+- Same media actions as Eyevue, plus live preview.
+- Status refreshes on selection.
+- Unsupported actions are still ignored; the log line now says "Ignoring unsupported TUNEBUDS dashboard action".
+
+**MoYoung W620**
+- Reconnect works, and Disconnect suppresses auto-reconnect.
+- Battery and media count are requested on selection.
+- Plugin SYNC and Tasker `data_download` start the MoYoung sync, which now goes through the family hook.
+- The transfer card Stop works, and closing the activity stops the sync.
+
+**Meta Ray-Ban**
+- Reconnect opens Meta pairing, and Disconnect stops the session.
+- HeyCyan controls and Tasker commands show the same "…unavailable for Meta Ray-Ban" toast.
+- Tasker `camera` saves a DAT photo.
+- Walking Aid and Visual Diary wait for the Meta camera. Auto Audio is refused with the same message.
+- A voice question is not blocked during a Meta camera session.
+
+**Meizu MYVU**
+- Reconnect is user-initiated.
+- onResume creates the manager.
+- The notification permission is requested for the connection service.
+- The background-feature restart reconnects.
+- The failure dialog appears only while MYVU is selected.
+- Camera and Auto Audio plugins are refused as before.
+
+**Mentra, generic audio, unknown**
+- Connection buttons go through the legacy SDK controls, as before.
+
+**Changes to controls that are already hidden**
+- StopLivePreview no longer calls the HeyCyan stop for families without live preview.
+- RefreshRecordingSettings no longer toasts "Connect HeyCyan…" for families other than HeyCyan or Eyevue.
+- The SetWearingDetection log text changed.
+
+## Phase 2: process audio sessions (`audio.AudioSessionCoordinator`)
+
+Filter logcat with:
+`adb logcat -s AudioSession GeminiLiveClient PluginVoiceRecognizer MeetingCaptureService AmbientSpeech AudioQuestionRecorder LocalAgentApprovalVoice StudioApprovalHandler HandsFreeTranslator WalkingAidService SpeechQueueController ImageQuestionAudio`
+
+Every session logs `"<owner> <KIND> granted state=…"`, `"<owner> route plan=… users=N mode=…, sco=…, communication=…"`, `"<owner> <KIND> -> SUSPENDED|ACTIVE|ENDED"` and `"<owner> <KIND> released restoredRoute=…"`. The glasses voice and image questions (`ai/questions/QuestionMicrophone`) use the coordinator too: owner `AudioQuestionRecorder`, kind `VOICE_COMMAND`, route from the glasses profile (`AudioRoutePolicy.forQuestion`: `DEVICE_SDK` for Mentra Live, and for MemoMind while its Opus recording link is available); their answers hold an `AssistantSpeaker` `PLAYBACK` session.
+
+**Shared route (applies everywhere)**
+- The Bluetooth route is restored only when the last session using it ends (`restoredRoute=true` once). Before, ending any feature reset the mode and dropped SCO under the others.
+- Restoration clears the communication device instead of re-selecting the "previous" one (Live, Local Agent approvals), and restores the previous audio mode instead of forcing NORMAL (meeting, ambient, plugins, Studio). A phone-mic meeting or ambient check no longer touches the mode or SCO at all.
+- Android 12+: every feature accepts LE Audio (`BLE_HEADSET`) as well as SCO headsets. Legacy SCO is used only when no communication device is offered and a headset looks connected.
+
+**Gemini Live** (glasses and earbuds, phone-only)
+1. Start Live: audio goes to the glasses mic/speaker as before. Log: `"Live audio route selectedBluetooth=…"`. Android 12+ no longer also calls `startBluetoothSco`; check the mic still comes from the glasses.
+2. During Live, trigger a Local Agent spoken approval (or a Studio approval, a voice question, or a chat voice note): expect `GeminiLiveClient -> SUSPENDED`, Live stops sending audio (`audioStreamEnd`), the prompt is heard and answered, then `-> ACTIVE` and Live hears you again.
+3. Start Live while a spoken approval is listening: `"Live capture waiting for the microphone"`, and Live starts listening when the approval ends.
+4. Phone call / other app taking focus: unchanged (focus loss pauses, permanent loss stops).
+5. Mentra Live: the PCM path and the playback signal are now chosen from the family audio profile (`VENDOR_PCM_STREAM` / `BLUETOOTH_WITH_PLAYBACK_SIGNAL`); behavior should be identical.
+
+**Meeting capture**
+1. With glasses: notification says "Source: Bluetooth mic". Android 12+ now waits up to 3 s for the communication device to become current (plus 250 ms) instead of a fixed 250 ms; if it never does, the source is "Phone mic".
+2. Android 11 and older: SCO now waits for a real "connected" broadcast (up to 6 s) and ignores the stale sticky state, which used to fail instantly.
+3. Start Gemini Live, a voice question or a translator during a meeting: the meeting keeps recording (never interrupted). Stop that feature: the meeting route must stay on the glasses (`users=` drops, no `restoredRoute=true`). Listen to the recording for gaps.
+4. Stop the meeting while Live runs: Live keeps its route.
+
+**Auto Audio speech check (AmbientSpeech)**
+- While Live, a meeting, a plugin or a spoken prompt holds the mic: `"Skipping speech detection: the microphone is in use"` and the loop does not extend.
+- If one starts during the 60 s check: `"Speech check stopped early: another session took the microphone"`; the result uses the frames so far.
+- After a check, a concurrent plugin or Live keeps its Bluetooth route (previously the check reset it).
+
+**Voice plugins (Hands-Free Translator, Live Caption Relay, Errand Brain, Meeting Spark Notes)**
+1. Start one plugin, then another: "Another voice plugin is already listening" (unchanged).
+2. Plugin running, then start Live / a spoken approval / a voice question: `"pausing recognition while another session uses the microphone"`, recognition resumes ~350 ms after it ends.
+3. Start a plugin while Live runs: it shows Listening but hears nothing until Live stops.
+4. Translator speech output still uses voice-communication audio on the glasses when the BT mic route is up, media otherwise.
+
+**Local Agent spoken approval and Studio approval**
+1. The prompt is spoken, then listening starts after the glasses route is confirmed (up to 3 s + 500 ms on Android 12+, up to 6 s SCO on older phones). Listening may start slightly later than before.
+2. Studio now uses `setCommunicationDevice` on Android 12+ instead of legacy SCO; check the beep and the reply both go through the glasses.
+3. Two approvals at once: the second one gets no microphone and falls back to its existing no-reply path (external reply / "No response received. Denied.").
+4. Prompt speech that is stopped (e.g. screen off) no longer waits for its timeout.
+
+**Voice questions / chat voice notes**
+- A voice question asked while another spoken prompt is listening (voice enrollment, a Local Agent or Studio approval) is refused with "The microphone is busy; please ask again" (spoken), now before the beep and cue (`Question refused: microphone is held by …`), with no route change. A chat voice note in that case shows "Unable to start recording".
+- Live and voice plugins pause during question and voice-note recording (`GeminiLiveClient -> SUSPENDED`, then `-> ACTIVE` after the beep that ends the question). A meeting recording keeps recording.
+
+**Glasses questions on the shared route (HeyCyan, Eyevue, TuneBuds, Meta, MYVU: Bluetooth headset; Mentra Live: SDK; MemoMind: SDK Opus link, Bluetooth headset as fallback)**
+1. Test voice and a wake-word question per family: `AudioQuestionRecorder VOICE_COMMAND granted`, `AudioQuestionRecorder route plan=…`, `Question route ready=true … input=<glasses>`, beep, cue, recording from the glasses mic, second beep, then `released restoredRoute=true` before the answer plays as normal media. Same cue, beep and listening timing as before (up to 3 s for the route, then 500 ms).
+2. Android 11 or older (legacy SCO): the route waits up to 3 s for SCO "connected", as before; a stale sticky "disconnected" no longer counts as a failure.
+3. Two Bluetooth headsets connected (glasses plus earbuds): the glasses are picked by name; if neither matches, "Could not connect the glasses microphone" is spoken, as before.
+4. During a meeting recording with the glasses: ask a voice question and an image question with a follow-up. The meeting keeps recording, the question joins its route (`users=2`), and after the question `users=1` with no `restoredRoute=true`; the meeting audio has no gap and stays on the glasses. Before, every question reset the mode and stopped SCO under the meeting.
+5. During Gemini Live: a question suspends Live and hands the microphone back afterwards; Live's route stays up (no `restoredRoute=true` while Live runs).
+6. Mentra Live and MemoMind (recording link up): `Question route: glasses SDK microphone, no Bluetooth call route`; no `route plan` change for the question. The SDK stream now opens before the beep (Mentra: `Microphone opened by AudioQuestionRecorder` before the cue); the cue must not end up in the recording (the question is not cut short right after the cue). MemoMind with the link unavailable: the HFP checks above apply.
+7. The cue and the answers sound as before (cue on the call route, answers as media); a Mentra answer still sets and clears the SDK playback signal, and `AssistantSpeaker PLAYBACK granted` / `released` brackets every answer.
+
+**TTS (all features)**
+- Walking Aid warnings/explore, Walking Aid chat, translator, notification announcements, Live announcements, Studio and Local Agent speech sound and route exactly as before. Streaming local-model replies still request transient focus once per reply and release it at the end.
+
+## Wave 3: shared database (Room in `:shared`)
+
+The schema is byte-identical: same file `cyanbridge-db`, version 8, identity hash `1f2b5479c1d0fe0282817bfd8e009967`. Still, run the upgrade test once on a phone that has real data:
+
+1. Install the previous build, signed with the release key, using `scripts/install_debug_keep_data.sh`.
+2. Create some data: chats with messages, a note, a meeting recording with a transcription, and memory/screen captures. Search memory once.
+3. Install this branch over it with `install -r` (no uninstall).
+4. Check that chats, messages, notes, recordings and transcriptions are intact and memory search returns the same results. Logcat should show no Room integrity or migration errors.
+5. Optional: `adb shell run-as com.fersaiyan.cyanbridge sqlite3 databases/cyanbridge-db "PRAGMA user_version; SELECT identity_hash FROM room_master_table"` should print `8` and the hash above.
+
+Known issue, not caused by this change: the memory search index needs SQLite FTS5. On phones whose system SQLite lacks it, fresh installs get no search index, and an upgrade from database version 4 or older fails at migration 4→5.
+
+**iOS (needs a Mac build):** existing chats appear after updating (a one-time import from NSUserDefaults), new messages persist across restarts, and a deleted chat stays deleted.
+
+## Wave 3: AI relay and providers in shared code
+
+- **Android relay chat, voice and image questions:** same fields, headers, timeouts, retries and error texts. The JSON bytes differ slightly (`/` is no longer escaped, and a whole-number temperature is written as `0.0`), but the values are the same.
+- **Relay errors:** test a real 402, 403 and 401 and check you get the same localized quota/subscription/auth messages. A 2xx response that isn't JSON now shows a different "Relay error: …" text.
+- **OpenAI-compatible endpoints:** URLs, payload with image/audio parts, streaming, and the health text should be unchanged.
+- **Local agent:** one UI-control run, to confirm model-output parsing is as tolerant as before.
+- **iOS (intentional changes to match Android):**
+  - Relay chat retries up to 3 times and checks `/capabilities` first.
+  - Errors read "Error: <relay error>".
+  - Remote OpenAI requests send `max_tokens` 2048 and `temperature` 0.7.
+  - Meeting notes use Android's prompt.
+
+## Wave 3: shared Eyevue protocol (iOS only)
+
+iOS now uses the protocol code Android already ran, so check with an iPhone and Eyevue glasses:
+- Start video sends `0x00`, as the vendor app does.
+- Replies in `AC 55` frames are accepted. The old shared parser probably dropped every reply from real glasses.
+- AI photos are capped at 4 MiB.
+
+## Wave 4: TuneBuds through the shared `TuneBudsSession`
+
+Filter logcat with: `adb logcat -s TuneBudsManager TuneBudsSpp TuneBudsSession TuneBudsMediaSync TuneBudsP2p TuneBudsLive GlassesNetSession`
+
+1. **Connect over SPP (Device Bind and Reconnect)**
+   - Expect `RFCOMM connected`, then "TuneBuds connected".
+   - Battery, firmware, model, coprocessor, storage and counts fill in.
+   - New: if the optional coprocessor-version query (E9) fails, startup continues (`Optional TuneBuds capability query failed`), as on iOS.
+2. **Photo:** it saves about 2.5 s after E1 and the camera closes.
+3. **Video and audio**
+   - Start and stop.
+   - A firmware or button stop resets the toggle.
+   - Stopping while still saving retries for up to 15 s.
+   - New: recording flags read false whenever RFCOMM isn't connected.
+4. **Battery, storage, counts, time sync, version**
+   - All update.
+   - New: an E9 timeout under "read versions" no longer shows an error.
+5. **AI photo (voice image question and Live photo button):** expect `TuneBudsSession: TuneBuds AI photo completed bytes=N`. These log lines moved from the `TuneBudsManager` tag to `TuneBudsSession`.
+6. **Media sync over file-manager Wi-Fi**
+   - Hotspot mode imports files with no immediate "disconnected".
+   - P2P mode, if the Wi-Fi mask has bit 4, also works.
+   - Low battery shows the "status 4" message.
+7. **RTSP live preview:** start and stop. Video arrives in about 300 ms, and the camera closes on stop.
+8. **Reconnect**
+   - Power-cycle or toggle Bluetooth: the status says "disconnected" and the toggles reset.
+   - Reconnect: battery and versions refill.
+   - Disconnect suppresses auto-reconnect.
+   - The Device Bind probe still identifies the glasses.
+9. **iOS (needs a Mac build)**
+   - AI photos use the strict JPEG assembler, so malformed streams are dropped.
+   - A camera-close notification clears the recording flags.
+
+## Wave 4: typed shared preferences
+
+Every prefs file, key, type and default is declared once in `shared/prefs`, and `PrefsInventoryTest` pins them. Run the upgrade check once:
+1. Install the previous build and change several settings:
+   - language, wake-word route, thumbnail quality, assistant mode and provider;
+   - relay URL, Pro Live economy;
+   - one plugin's settings, appearance and accent;
+   - remote server with an API key, and Pro login.
+2. Install this build over it (`adb install -r`).
+3. Check:
+   - Every setting is unchanged.
+   - The remote API key and Pro token still work, which proves the encrypted prefs are still read.
+4. Optional: diff `run-as … shared_prefs/*.xml` before and after. File names, keys and value types must be identical.
+
+**iOS (needs a Mac build):**
+- Wake word route, thumbnail quality, assistant mode, language and the remote server settings keep their existing NSUserDefaults names.
+- The appearance and welcome flags still load.
+
+## Wave 5: shared Glasses dashboard controller
+
+**Android:** behavior is unchanged. Meta and Meizu panel actions now run only while that family is selected, which is already the only time the panel renders. The per-family checks above cover this.
+
+**iOS (compile on a Mac first: `-PenableAppleTargets=true :shared:compileKotlinIosSimulatorArm64`)**
+
+Deliberate changes:
+- **Eyevue**
+  - Handles actions whenever it is selected.
+  - Media count, start sync and volume now show "not implemented in the iOS host yet"; they no longer fall through to HeyCyan BLE or hotspot commands.
+  - The image question listens for a spoken question while the photo transfers.
+  - Shows the Advanced and Device info cards when linked.
+- **Battery and storage cards:** shown by family profile, with "--" until data arrives. Meta, audio-only and unknown glasses have no battery card.
+- **TuneBuds, SDK glasses, Meizu:** undeclared actions show "not implemented" instead of the HeyCyan fallback messages.
+- **Wake word and thumbnail quality:** saved only for families that support them.
+- **QCSDK assistant hooks:** apply only while HeyCyan is selected.
+
+Smoke test per family:
+- connect;
+- photo or AI photo;
+- battery;
+- image question;
+- sync (HeyCyan only);
+- the Meta and Meizu panels.
+
+## Wave 6: dead-code removal
+
+No glasses needed. Deleted code had no caller, so behavior is unchanged:
+- **Pairing:** `DeviceBindActivity` lost its unused protocol auto-detection probes; pair one glasses family through manual selection to confirm the dialog still finishes on connect.
+
+## Wave 7: shared screen ViewModels — chats, notes, recordings
+
+**Android**
+
+Screens and strings are meant to be identical, and the emulator pixel comparison will check this. Known changes:
+- A generation or a voice-note recording now continues through a rotation. Before, rotating stopped and attached the recording.
+- Closing the chat screen while recording now discards the voice note silently. There is no late "Voice note attached" toast.
+- `KnowledgeSyncWorker.schedule` runs once per screen ViewModel instead of on every `onCreate`.
+
+Smoke test:
+- Send text, an image and a voice note in a chat.
+- Title generation.
+- Delete a chat.
+- The daily-facts review chat.
+- Note edit and save.
+- Recordings list, gallery open and share.
+- Transcription debug.
+- Knowledge integrations sync.
+
+**iOS (Mac build; chats now run on Android's logic)**
+- Empty chats are hidden. A new chat is created on the first send.
+- Titles are generated the Android way: the first 32 characters, then a 2–6 word AI title, with one extra AI call.
+- Voice records a voice note (30 s auto-stop) that is transcribed when sent. Before, the transcript went straight into the composer.
+- Errors read `message ?: "Failed to get response"`.
+- A note save with an empty body is ignored.
+
+## Wave 7: shared screen ViewModels — plugins and devices
+
+**Android**
+
+Screens and strings are meant to be identical. Known changes:
+- Plugin settings, Walking Aid, Community Plugins, Publish, Pending actions, Daily summary, battery guide and EvenHub keep their state through a rotation. Before, rotating reloaded it. Community Plugins no longer re-fetches the catalog on rotation.
+- Toasts from these screens use the application context. Service stops and history clears are unchanged; Auto Audio and Walking Aid still start from the Activity so their permission prompts appear.
+- The community catalog is parsed by the shared parser. Only malformed entries differ: a JSON `null` field now counts as missing instead of the text "null".
+- The device bind screen still resets on rotation and rescans, as before.
+
+Smoke test:
+- Device bind for each family: HeyCyan, EyeVue, TuneBuds and MoYoung through the second picker; Meta (opens Meta pairing); Meizu (bond dialog); audio-only.
+- Meta pairing and Mentra pairing are unchanged; open each once from device bind.
+- Plugin switches on/off from Community Plugins and from each settings screen: Live Caption, Translator, Meeting notes (also "summarize now"), Errand Brain, Auto Audio (with and without microphone permission), Walking Aid.
+- Clear history on each plugin settings screen.
+- Walking Aid: model download progress for the detector and depth model, latency and acquisition benchmarks, focus translate and save, cloud model pickers, readiness dialog with a missing model, Explore/Walking mode switch, "Ask about surroundings" chat with speech.
+- Community plugin refresh, Tasker profile download, plugin publish (validation errors, then a successful submit).
+- Pending actions approve/reject; daily summary regenerate and share; battery guide answers; EvenHub app load and display.
+
+**iOS (Mac build; device bind now runs on Android's pairing choices)**
+- Selecting a device: Mentra Live keeps Mentra (and connects through the Mentra SDK); other unknown classes still map to HeyCyan.
+- Confirming EyeVue, TuneBuds or MoYoung in the first picker now connects as that protocol instead of HeyCyan.
+- Confirming an unknown class closes the screen with "Unknown device type."
+
+## Wave 7: shared screen ViewModels — Pro, Gemini Live, Tasker setup, local models
+
+**Android behavior changes**
+- **Rotation:** ViewModels now survive it.
+  - The Pro checkout doesn't reconnect billing.
+  - Pro settings doesn't refetch.
+  - The model test doesn't rerun.
+  - Gemini Live pauses and resumes instead of closing and auto-restarting.
+- **Closing a screen mid-request** cancels the work. Leaving during free-trial activation skips the local entitlement write; the next server check restores it.
+- **Pro settings "cancel with the plan still active"** reloads in place instead of calling `recreate()`.
+
+**Device checks**
+- **Pro checkout (Play test account)**
+  - Buy each plan; check the price toast and that settings opens.
+  - Restore with a matching and a non-matching email.
+  - Email code dialog: resend, link, wrong code.
+  - Web checkout return.
+  - Donation flow and return.
+  - Cancel for web and for Play.
+- **Pro settings:** model pickers and quota, plan change, cancel, starting Gemini Live.
+- **Local models**
+  - Gated download, with and without a token, plus the warnings dialog and cancel.
+  - Import a GGUF and an mmproj file.
+  - Delete and unload.
+  - The unsaved-changes prompt on back.
+  - Remote server test.
+  - Studio bridge, including its permission prompt.
+  - Performance test: LiteRT MTP and the llama.cpp baseline.
+- **Gemini Live**
+  - Start from the Free and Pro dialogs.
+  - Permission gate with notifications denied (preview runs) and allowed (service runs).
+  - Auto-start with an initial image.
+  - AI-photo button.
+  - 60 s idle stop after an answer with no reply or new question (the 5-minute Free/Economy cap is separate).
+- **Tasker setup:** import, verify, test voice.
+
+## Found by the screen comparison
+
+- **Eyevue selected at startup:** the baseline started a connect, cancelled it, and showed "Eyevue error". The refactor makes a single attempt. With real Eyevue glasses, check that launching the app with Eyevue selected connects once, and that the status goes Connecting → connected with no transient "Eyevue error".
+- **Settings and icons changed by the iOS branch's shared UI:** see SCREEN_PARITY.md. These are product changes to confirm with the collaborator, not refactor regressions.
+
+## Small cleanups: default mode, transcription endpoint, accessibility service, Tasker on iOS
+
+- **iOS default assistant mode:** on a fresh install (nothing saved), the Glasses screen selects the custom-provider button, not Phone assistant. After picking Phone assistant and relaunching, it stays on Phone assistant.
+- **iOS without Tasker:** Settings → AI provider lists only Local and Pro, with no "Tasker integrations" button and a description without Tasker; the dashboard button reads "Local / Pro"; HeyCyan's advanced section has no Local Agent entry. An install that had Tasker saved shows Local selected. Android still shows Tasker everywhere.
+- **Meeting transcription (Android):** works with Local and with Pro.
+- **Local Agent settings, "Accessibility service" row (Android):** it shows Enabled when AutoInput's accessibility service is on and Disabled when it is off. Tapping it shows the disclosure and opens Android's Accessibility settings.
+- Local Agent settings no longer shows Telegram Remote Control.
+
+## MemoMind (new family, shared `MemoMindSession`)
+
+Filter logcat with:
+`adb logcat -s MemoMindManager MemoMindSpp MemoMindSession MemoMindHud MemoMindMic MemoMindOpus AudioSession GlassesBridge NotificationForwarder`
+
+Force-stop the official MemoMind app first: the glasses accept one app connection. Protocol summary: `android/CyanBridge/docs/memomind/README.md`.
+
+1. **Pairing.** Pair the glasses in Android Bluetooth settings. Scan: the glasses appear as "MemoMind One …" (also when only bonded, not advertising), classified MemoMind; the type dialog has a MemoMind choice. Connect: log `SPP connected on 00007033-…` (or the `00001101-…` fallback; note which), then `Ready model=H001Y fw=… webBridge=… service=…`. Unpaired glasses: the "Pair MemoMind in Android first" dialog appears.
+2. **Battery.** The dashboard status and the MemoMind panel show the battery from `01/06` (`bat`); it refreshes every 5 minutes and on the Battery action. Compare with the official app; check charging.
+3. **HUD.**
+   - Test notification: a native notification card titled CyanBridge.
+   - Show text: the native teleprompter opens with two lines. Note how pages and scrolling behave and whether `TeleprompterPage` events are logged (`Unsolicited`/page requests).
+   - Clear display: the teleprompter closes.
+   - Comfort brightness: the display dims to level 7 (`01/0E`).
+   - With the Web Bridge plugin started from the official app (then the official app closed): reconnect, log shows `webBridge=true`; Show text is drawn as a text box instead of the teleprompter, Clear wipes it.
+   - Plugins: Live Caption Relay / Errand Brain cards appear on the HUD (teleprompter for text, notification cards for cards).
+4. **Buttons and head gestures.** Only with the Web Bridge plugin running: presses log `Input Button(...)`; a primary long press logs `Voice question requested by the glasses button` and starts the dashboard voice question (CyanBridge open), or the same question in the background with the app closed (A3 section below). Without the plugin, record any `Unsolicited service=… command=…` lines the native buttons produce; they map future native triggers.
+5. **Mic question (Opus link, README "Questions (Android)").** Add `ImageQuestionAudio AudioQuestionRecorder` to the filter.
+   - "Test microphone" in the MemoMind panel: `Microphone streaming compact=… ms: processing=… link=… format=… started=…`, then "N Opus frames, peak level X%" (expect about 150 frames in 3 s and a level that follows your voice); log `Opus decoder output 48000 Hz` or 16000. Record the `started=` time (the link's start latency).
+   - "Test voice" and a long press: `AudioQuestionRecorder VOICE_COMMAND granted` with route `DEVICE_SDK`, `Question route: glasses SDK microphone, no Bluetooth call route`, `Question beep done at +N ms`, then `Question SDK stream ready, recording from +M ms` and `Capture started input=glasses SDK PCM`. Record N and M: M should be close to the end of the cue (the link starts at the beep); note any extra wait after the cue. The question is heard and answered on the glasses speaker; listen for clipping of the first word and for the cue leaking into the question (a question that ends right after the cue).
+   - No SCO during the question (`route plan` unchanged, the phone does not enter a call); the answer plays as before. Ask a follow-up in the follow-up window: it records from the Opus link too (a second `Microphone streaming` line).
+   - Recognition quality: ask the same sentence as with an older build (HFP) and note whether the answer understood it as well (the Opus stream is 16 kHz with the glasses' noise reduction; HFP is often 8 or 16 kHz).
+   - Coexistence: during a meeting recording with the glasses, a question records Opus while the meeting keeps HFP (`users=` unchanged, no gap in the meeting audio). Note whether the firmware delivers both at once. During Gemini Live the question suspends Live as before. During a voice enrollment or a spoken approval the question is refused ("The microphone is busy"). A MemoMind Web plugin capturing audio (Audio Capture Lab) is paused by a question from the phone and resumes afterwards, still receiving frames.
+   - Fallback: with firmware or a moment where the link cannot start, `Question SDK stream failed at +N ms: …`, `Glasses SDK stream unavailable …; using the headset route`, then a second beep and cue on HFP; later questions go straight to HFP (`Question route ready=…`) until a reconnect or a successful panel test. Note how often this happens.
+6. **Notifications.** Forward notifications (grant notification access when asked): phone notifications appear as native cards with the app name; WhatsApp read-aloud is unaffected. Disconnect turns forwarding off.
+7. **Reconnect.** Power the glasses off and on: the link-loss log, then reconnection within ~5–30 s (manager retries and the ACL-connected auto-pair). Disconnect in the panel stays disconnected (auto-reconnect suppressed) until Connect.
+8. **Other families unchanged:** the device type dialog shows one extra choice (MemoMind); HeyCyan, MYVU and the rest pair and connect as before, and MYVU notification forwarding (if enabled elsewhere) still shows "app: title" text.
+
+### MemoMind Web plugins (Android)
+
+`adb logcat -s MemoMindWebPlugin MemoMindWebPlugins MemoMindSession MemoMindMic AudioSession chromium`. Packages: PhoneSDK `dist/` (`app-counter-0.1.0.mmpkg`, `display-control-lab-0.1.4.mmpkg`, `audio-capture-lab-0.1.10.mmpkg`, `permission-debug-0.2.8.mmpkg`, `weather-0.1.0.mmpkg`); copy them to the phone (Downloads). Summary: `android/CyanBridge/docs/memomind/README.md#web-plugins`.
+
+1. **Entry and list.** MemoMind panel ▸ Web plugins opens the list; other panel buttons and other families' panels are unchanged. Disconnected: the "MemoMind is not connected" note. Connected without Web Bridge: the platform-limit note (start Web Bridge in the official app).
+2. **Install.** Install .mmpkg ▸ pick `app-counter-0.1.0.mmpkg`: the dialog shows name, id, version, size, requested permissions and the unsigned-package note; Install adds it to the list. Reinstall the same file: "Replaces the installed version". Pick a non-package file (a photo, a `.zip` without manifest): "Not a valid MemoMind Web plugin: …" and nothing is installed. Talking Pet shows "Needs the glasses plugin com.memomind.example.talking-pet".
+3. **Permissions.** Open: the permission dialog lists each permission unchecked; Start stays disabled until all required ones are checked. Reopening does not ask again; Permissions in the list changes them. With permission-debug: declined optional permissions give `PERMISSION_DENIED`/`NOT_GRANTED` in the lab, storage works when granted, location and files report unavailable.
+4. **Display with Web Bridge running** (start it in the official app, force-stop the official app, connect; log `webBridge=true`). app-counter: its text appears on the glasses and the button increments the counter (`device.button` events); the assistant voice question does not start while the plugin is open, and starts again after closing it. display-control-lab: text, raw GRAY_4, LZ4 and atomic framed images render; record any frame status other than 0.
+5. **Without Web Bridge.** Restart the glasses (Web Bridge stops), reconnect: the running plugin shows the platform-limit note; app-counter text appears on the native teleprompter; image calls report `CAPABILITY_UNAVAILABLE` in the plugin.
+6. **Microphone.** audio-capture-lab with `audio.capture` granted: start capture, speak; the red "… is recording from the glasses microphone" line shows; chunks arrive (`interactive` 40 ms) with low `queueLatencyMs`; stop: the lab's frame and byte totals match. Start a dashboard "Test microphone" during capture: `AUDIO_BUSY` or the capture is suspended (`AudioSession` log). Leaving the screen (Home) stops the capture.
+7. **Messages.** With a paired glasses plugin (e.g. Talking Pet started by the official app): `plugin.sendMessage` on its declared channel succeeds and replies arrive as `plugin.message`; a channel not in the manifest is refused.
+8. **Sandbox.** weather declares `network` as required: Start stays disabled until it is checked, then the forecast loads. permission-debug with `network` declined: its network probe fails (request refused, CSP error in `chromium` log); granted: it reaches the server (a CORS error is still possible). A plugin link to another site does not navigate. Remove a plugin: it disappears with its data; reinstall starts with empty storage and asks for permissions again.
+
+### MemoMind on iOS (Mac build: `-PenableAppleTargets=true :shared:compileKotlinIosSimulatorArm64`, then the host app on an iPhone)
+
+Filter the Xcode console with `IosMemoMind` (covers `IosMemoMind`, `IosMemoMindBle`, `IosMemoMindIap2`) and `MemoMindSession`. Close the official MemoMind app first (swipe it away): it may hold the glasses' only app connection.
+
+1. **Does the firmware expose BLE GM at all?** This decides whether iOS works without MFi. Select the glasses in Scan (they appear as "MemoMind One …", classified MemoMind; also when another app keeps them connected, since iOS lists connected MemoMind peripherals). Expected: `GM GATT ready service=… frame=N`, then `Ready over BLE model=H001Y fw=… webBridge=…`. Record the logged service UUID (`FB349B5F-…` or `2020`) and `frame` (MTU - 3) with the firmware version. If the panel instead shows "…expose no GM Bluetooth LE service (0x2021/0x2022)…", the release firmware is an MFi build without the GATT service: go to step 7.
+2. **Battery.** The dashboard and MemoMind panel show the battery from `01/06`; Battery refreshes it. Compare with the official app.
+3. **HUD.** Test notification (native card "CyanBridge"), Show text (teleprompter, two lines), Clear display, Comfort brightness (level 7), as on Android. Long text checks fragmenting: Show text with a plugin card (Live Caption Relay) longer than `frame` bytes must arrive whole (each fragment waits for the empty flow-control reply). Note any lost or garbled long *replies* (device info is the longest): the firmware sizes notifications to 512 bytes, not the MTU.
+4. **Button question.** With the Web Bridge plugin started from the official app (then that app closed): reconnect, `webBridge=true`; a primary long press logs `Voice question requested by the glasses button` and runs the voice question: the cue and answer play on the glasses (HFP) and the question is heard through their microphone.
+5. **Microphone.** Over BLE, Test microphone shows "Bluetooth LE has no recording stream…" and starts a voice question through HFP (no Opus stream: the firmware has no BLE recording channel).
+6. **Notifications / disconnect.** The Notifications button shows the iOS limitation message (no forwarding). Disconnect in the panel drops the BLE link; Connect reconnects to the saved glasses. Power-cycling the glasses shows Disconnected; Reconnect brings them back.
+7. **iAP2 (development build).** `ios/CyanBridgeKMPHost/Info.plist` already declares `ql.iap2.protocol02` and `ql.iap2.protocol01`. Pair the glasses in iOS Settings ▸ Bluetooth, close the official app, then Connect in the MemoMind panel: `iAP2 session open: … protocols=[…]`, `Ready over iAP2 …`. HUD and battery as above; Test microphone then reports "N Opus frames in 3 s (iAP2)" (about 150). If iOS refuses the session ("iOS did not open the MemoMind ql.iap2.protocol02 session"), record whether the official app was running. If the glasses only appear over BLE, check that they are paired in iOS Settings ▸ Bluetooth.
+8. **Other iOS families unchanged:** HeyCyan, Eyevue and TuneBuds still connect and use their own write characteristics.
+
+## Mentra Live through Device Bind (see MENTRA_AUDIT.md)
+
+Filter logcat with:
+`adb logcat -s MentraLive DeviceBindActivity AutoPair AudioQuestionRecorder GeminiLiveClient GlassesAiPhotoCapture`
+The SDK's own lines appear under its `Bridge` log tags (`MAN:`, `LIVE:`).
+
+1. **Fresh pair from Device Bind.** Unpair the glasses from any other phone (three power-button presses open the pairing window). Open Scan. The Mentra Live row appears in the normal list (`"SDK scan started"`), and the type dialog preselects "Mentra Live". Connect. Accept any Android pairing dialog. Expect `"Connecting to <name>"`, then `"Glasses ready=true"` and `"Gallery mode off…"`. The dashboard shows "Connected - <name>" and the battery. There is no "Pair Mentra Live" button any more.
+2. **No Mentra SDK for other users.** With HeyCyan or Eyevue glasses and no Mentra nearby, open Scan. There is no "Mentra Connected" notification and no `MentraLive` log lines.
+3. **Reconnect on launch.** Force-stop the app with the glasses on. Relaunch. Expect `AutoPair`/`MentraLive` `"Reconnect (startup) to <name> requested"` and a connection without opening Scan. Also turn Bluetooth off and on, and walk out of range and back: the SDK reconnects by itself.
+4. **Switching away.** Pair HeyCyan from Scan. Expect `"Released (selected HEY_CYAN)"`. Mentra no longer reconnects.
+5. **Photo.** Dashboard Photo saves on the glasses ("Photo saved on the Mentra Live glasses."). The count action shows the photo and video counts.
+6. **AI photo.** Gemini Live auto image and Walking Aid with Mentra selected: expect `"AI photo received bytes=…"`.
+7. **AI photo question (button press and dashboard Image test).** Expect `"Button press -> image question"`, then "Ask about the image now…", `"AI photo received bytes=…"`, the toast "Fast BLE preview: <w>x<h>, …" and the answer. There is no "Glasses are not connected" toast any more. With the glasses off: "Connect Mentra Live first." (see the A3 section below for the rest).
+8. **Button voice question.** Long press. Expect `"Button long press -> voice question"`, `ImageQuestionAudio` `"Question route: glasses SDK microphone, no Bluetooth call route"` (no `Selecting Bluetooth microphone route` line, no SCO state lines), `AudioQuestionRecorder` `"Capture started input=glasses SDK PCM"` and `MentraLive` `"Microphone opened by AudioQuestionRecorder"`. Note whether the beep and "Ask."/"Listening" cue are heard on the glasses or on the phone. The answer plays on the glasses (media output).
+9. **Gemini Live mic.** Start Live with Mentra selected. Expect `"Microphone opened by GeminiLiveClient"`. Speech is heard, and the reply plays on the glasses with no SCO switch. Ask a voice question during Live: both listeners coexist, and Live resumes afterwards.
+10. **Video.** Video starts and stops a recording on the glasses ("Video recording started/stopped").
+11. **Advanced → Device info.** Battery, Version (firmware), Sync time, Volume (0-15).
+12. **Not wired (should say so, not fail silently).** Audio recording points to meeting capture. There is no live preview card. (Sync Wi-Fi now downloads the gallery; see below.)
+
+## Mentra gallery download (see MENTRA_AUDIT.md, "Gallery download")
+
+Filter logcat with:
+`adb logcat -s MentraGallery MentraLive GlassesNetSession GlassesSession DataDownload`
+The SDK's own hotspot lines appear under its `Bridge` tags. `MentraGallery` lines are the sync itself.
+
+Setup: Android 10 or newer, phone Wi-Fi on, Mentra Live connected and ready. Take two photos and one short video with the dashboard Photo and Video actions. Count should then show them.
+
+1. **First sync.** Tap Sync Wi-Fi. Grant Nearby devices (Android 13+) or Location if asked. Expect `GlassesSession` `"Acquired media sync session"`, then `"Glasses hotspot <ssid> at <ip> (openedBySync=true)"` and `GlassesNetSession` `"Mentra Live gallery download owns the glasses link"`. Android shows its "connect to device" dialog for the glasses network; choose it. Expect `"Joined the glasses hotspot <ssid> (app-scoped, default network unchanged)"`, `"Gallery server reachable at http://<ip>:8089"` and `"Gallery V3_MANIFEST|V2_CAPTURES|LEGACY_FILES: N listed, …"`. **Record which protocol the firmware uses.** The transfer card counts photos and videos. Each file logs `"Saved <remote> as MentraLive_<capture>.jpg|mp4 (<bytes> bytes)"`.
+2. **Phone stays online.** During the sync, open a web page in a browser on cellular, or on the home Wi-Fi if the phone supports two Wi-Fi connections at once. The system default network must not switch to the glasses (`adb shell dumpsys connectivity | grep -i "default network"`). Note whether the phone dropped the home Wi-Fi while joined; single-radio phones may.
+3. **Delete prompt.** After the downloads, "Delete from glasses?" lists the verified count. Wait 2–3 minutes before answering: the sync keeps the hotspot alive. Then Delete. Expect `"Deleted N of N verified files from the glasses"`. Count afterwards drops by N. Repeat once with Keep: `"Kept N verified files on the glasses"`. The files stay, and Count is unchanged.
+4. **Gallery.** Open the media Gallery screen. The new photos and videos appear next to HeyCyan/Eyevue media, sorted by capture time (not sync time). The videos play, and the photos open at full size.
+5. **Re-sync is idempotent.** With files kept on the glasses, Sync again. Expect `"0 new … N already on the phone"`, no new gallery entries, and the delete prompt again (they are verified by name and size).
+6. **Cleanup.** At the end: `"Left the glasses hotspot and released the glasses link"`, then `"Glasses hotspot turned off (disabled)"` and `"Released media sync session"`. The phone returns to its usual Wi-Fi. If the hotspot was already on before Sync (`openedBySync=false`), it must stay on.
+7. **Stop mid-transfer.** Start a sync with a long video, then tap Stop on the transfer card. The card hides, no summary toast appears, and the cleanup lines from step 6 still appear. The partial file is not in the gallery.
+8. **Link loss.** During a download: (a) power the glasses off, and (b) in another run turn phone Wi-Fi off. Expect `"Mentra Live disconnected during the gallery sync"` or `"The glasses hotspot connection was lost"`, a "Mentra Live sync failed" toast, and the cleanup lines. Nothing partial is saved or deleted.
+9. **Approval refused.** Cancel Android's connect dialog. Expect "The glasses hotspot was not approved or could not be found", the hotspot turned off, and the session released.
+10. **No collisions.** With HeyCyan Wi-Fi ADB or live preview running on another profile, or with a Mentra video recording running, Sync refuses with a message instead of joining. Debug builds: start Wi-Fi ADB right after a Mentra sync; it gets the link only after `"released the glasses link"`.
+11. **Unsupported formats.** If the glasses hold AVIF/HEIC photos or HDR captures, check `"Left on the glasses (unsupported): …"` for the non-JPEG ones. HDR captures save their `base.jpg` only.
+
+## Mentra firmware update (see MENTRA_AUDIT.md, "Firmware update (OTA)")
+
+Filter logcat with:
+`adb logcat -s MentraOta MentraLive Dashboard`
+The SDK's own lines appear under its `Bridge` log tags (`LIVE:` lines mention `ota_start`, `ota_status` and `version_info`). Every stage change logs `MentraOta: stage=… failure=… code=… restartRequired=…`; every glasses event logs `ota_status <status> <step>/<phase> step n/N x%/y% error=…`.
+
+Use glasses you can recover over USB (the SDK docs' ADB bootstrap: install the release's ASG client APK). Keep the official Mentra app closed during the test.
+
+1. **Entry point and gating.** With Mentra Live selected, Advanced → Device info shows a "Firmware update" button under Sync time / Volume. With HeyCyan, Eyevue, TuneBuds, Meta, MYVU or MemoMind selected, the Device info section looks exactly as before (no new button), and the HeyCyan OTA section is unchanged. The iOS dashboard shows no button.
+2. **Versions and check.** Open the screen with the glasses connected. "Installed on the glasses" shows the glasses software (build), system software and BES firmware. Compare them with the official app. The check runs on its own: expect `Manifest pinned: …` (or `legacy` for glasses app builds below 39) and `Check: updateAvailable=…`. Already up to date: "Mentra Live is up to date." With the phone offline: "Could not check…" and Check again works once online.
+3. **Preconditions** (on glasses with an update available). Each of these must disable "Update now" with its own line: battery below 25% (charge from 24% to 25%; the line clears within a second or two); glasses Wi-Fi off; Gemini Live running (microphone in use); a media sync or other exclusive glasses task running. With the glasses off the charger, the "keep the glasses on the charger" advice shows but does not block.
+4. **Wi-Fi setup.** With glasses Wi-Fi off: Set up glasses Wi-Fi → the glasses scan (`requestWifiScan`), pick a network, enter a wrong password (expect "Wrong password." or "could not join"), then the right one. The Wi-Fi line changes to the network name and the Wi-Fi blocker clears.
+5. **Confirmation.** Update now opens the confirmation. Cancel starts nothing (no `ota_start` in the log). Install sends it: `Update pass 1 starting: [APP, …]`, `ota_start acknowledged`, `Firmware update active=true`.
+6. **During the update.** The display stays on and the warning banner shows. Back and the top-bar arrow show "Wait until the update finishes." and do not leave. A press or long press on the glasses button logs `ignored during the firmware update`. Press Home, then reopen CyanBridge from the launcher: the update screen is still on top and the progress continues. If it was closed anyway (for example "Don't keep activities"), the dashboard's Firmware update button is still allowed during the update and shows the running update. Progress shows "Step n of N: downloading/installing …" and the percentage never goes backwards within a step.
+7. **Restarts.** App install: expect either `ota_status complete` or a new glasses build (stage `FINISHING`, then `VERIFYING`). BES install: after `complete` expect `RESTARTING`, the link drops, the glasses reconnect, then `FINISHING` and `VERIFYING`. If more parts remain, the screen offers "Continue update" ("Part of the update is installed"). Continue until "Update complete. Mentra Live is up to date." Then compare the versions with the official app and confirm photos, the button and voice questions still work.
+8. **Failure paths** (only if they happen naturally; do not force a BES failure). A download failure shows the network message and the glasses error code. Note the code. A failure after the BES install started must show the restart instruction with no Check again button until the glasses disconnect (power-cycle them). Record any `failure=STALLED`, `NO_PROGRESS` or `RESTART_TIMEOUT` with the time since the last `ota_status`; these are phone-side watchdogs and the glasses may still be working. Wait for the cool-down notice to clear before checking again.
+9. **Exclusive use.** During the update, Advanced → Device info actions and Photo/Video on the dashboard are refused (the OTA session). After the update ends, they work again (`Released the glasses`, `Firmware update active=false`).
+
+## Mentra Live preview and broadcast (see MENTRA_AUDIT.md, "Live preview and broadcast")
+
+Filter logcat with:
+`adb logcat -s MentraLiveStream MentraBroadcast MentraLive GlassesNetSession AudioSession WalkingAidService`
+`MentraLiveStream` is the preview (route, ingest, remux, loopback player, LibVLC events); `MentraBroadcast` is the broadcast; `MentraLive` logs every `Stream status <state> id=… willRetry=…`. The SDK's own lines appear under its `Bridge` tags (`start_stream`, `stream_keep_alive`).
+
+Setup: Android 10 or newer, phone Wi-Fi on, Mentra Live connected and ready. For the broadcast, a server you control: for example MediaMTX on a laptop (`rtmp://<laptop-ip>:1935/live/test`, `srt://<laptop-ip>:8890?streamid=publish:live/test`) or YouTube/Twitch RTMP.
+
+1. **Gating.** With Mentra Live selected, the dashboard shows "Mentra Live camera" with Start live preview / Stop and a "Broadcast to my server" button. With HeyCyan, Eyevue and TuneBuds selected their live preview sections look exactly as before (no broadcast button). Meta, MYVU, MemoMind, MoYoung and audio-only show no live preview section. iOS shows none.
+2. **Preview over the hotspot** (glasses not on Wi-Fi). Start live preview; grant Nearby devices / Location if asked; accept Android's "connect to device" dialog. Expect `Glasses hotspot <ssid> at <ip> (openedByPreview=true)`, `GlassesNetSession` "Mentra Live live preview owns the glasses link", `Joined the glasses hotspot`, `RTMP ingest listening on <phone-ip>:1935`, `startStream rtmp://<phone-ip>:1935/live/****`, `Glasses publishing from /<glasses-ip>:…`, `Stream metadata width=… height=…`, `First keyframe received (avc1.…)`, `Player attached to the local stream`, then the LibVLC `video output ready: WxH`. Video shows in the card within about 5 s of the dialog. **Record:** the time from Start to video, the `Glasses streaming: WxH fps bps` line, and whether the glasses ever logged an error (especially a "no Wi-Fi" refusal in hotspot mode, which would block this route).
+3. **Latency.** Point the glasses at a phone stopwatch and photograph both screens. Expect roughly 0.5–1 s. Record it.
+4. **Preview on a shared Wi-Fi.** Connect the glasses to the phone's Wi-Fi (firmware update screen → Set up glasses Wi-Fi). Start the preview: expect `share a Wi-Fi network; no hotspot needed`, no hotspot dialog, and video.
+5. **Stop and cleanup.** Stop: expect `Glasses stream stopped (stopped)`, `Left the glasses hotspot and released the glasses link`, the hotspot turned off, and the phone back on its normal Wi-Fi. Start again: it works the second time. Take an AI photo (image question) right after: it works.
+6. **Exclusive use.** During the preview: Sync Wi-Fi, an AI photo and the broadcast are refused with a "busy with live preview" message; the camera light is on.
+7. **Link loss.** During the preview (a) power the glasses off, (b) walk out of range, (c) turn phone Wi-Fi off. Expect `Mentra Live disconnected`, `The glasses hotspot connection was lost` or `video stopped arriving`, an error in the card, and the cleanup lines. Start works again afterwards.
+8. **Walking Aid video.** Walking Aid settings → "Mentra Live continuous video" → enable. Expect the same preview lines (no card video), then detections. Disable: cleanup lines.
+9. **Broadcast refusals.** Open "Broadcast to my server". With the glasses off Wi-Fi: "Glasses Wi-Fi: not connected", Set up glasses Wi-Fi opens the firmware update screen, and Start says "Connect Mentra Live to a Wi-Fi network with internet first." Wrong URLs (`http://…`, `rtmp://host/live`, `rtmp://localhost/live/key`, `srt://host`) each show their message. While the preview runs, Start says the glasses are busy.
+10. **Broadcast.** With the glasses on Wi-Fi with internet, enter the RTMP URL and Start. Expect `startStream rtmp://…/****`, `Stream status initializing`, then `streaming`; the screen shows Live, the video size/fps/bitrate and live stats; the server receives video and sound ("Sound: glasses microphone"). The URL is still there after reopening the screen. The dashboard card shows "Broadcasting to …". Close the screen and come back: still live. Repeat with an SRT URL.
+11. **Broadcast status events.** Block the server (stop MediaMTX) while live: expect `reconnecting` (Reconnecting n/m) and then `streaming` again when the server returns, or `reconnect_failed` → Failed. **Record** the states and timings the glasses report.
+12. **Broadcast audio arbitration.** Start meeting capture first, then the broadcast: it runs with "Sound: off (another recording is using the microphone)". Voice questions during a broadcast still work; note whether the stream's sound cuts out while the assistant uses the glasses microphone.
+13. **Broadcast stop.** Stop broadcast (or Stop on the dashboard card): `Broadcast ended (STOPPED)`, the server stream ends, and AI photos and the preview work again.
+
+## Mentra SDK display glasses (see MENTRA_AUDIT.md, "Display glasses through the SDK")
+
+Models: Even Realities G1 and G2, Mentra Display (Android only), NIMO, Xingyi AR99. Logs:
+
+`adb logcat -s MentraLive MentraDisplay DeviceBindActivity AutoPair GlassesBridge AudioQuestionRecorder ImageQuestionAudio AIHijack`
+
+The Mentra SDK's own lines (`MAN:`, `G1:`, `G2:`, `Nex:`, `NIMO:`, `AR99`) come through its log callback and logcat. The SDK drives one model at a time; test one pair of glasses at a time unless a step says otherwise.
+
+**Every model**
+1. **Detection.** Open Scan with the glasses on and in pairing mode. The row appears with its Bluetooth name (AR99: its name, or "Xingyi AR99" when it advertises none). The type dialog preselects the model and offers it; no other row offers it. A HeyCyan or Mentra Live row never offers these models.
+2. **Pair.** Connect. Expect the toast "Looking for your <model> to connect.", `MentraLive` `"SDK scan for <MODEL> started to pair …"`, `"Connecting to <MODEL> <sdk name> (<address>)"`, then `"Glasses ready=true"`. Accept any Android pairing dialog. The dashboard shows "Connected - <model>", the battery and the meeting card only (no camera, gallery, preview or firmware sections). There is no "Gallery mode off" line.
+3. **Not found.** Turn the glasses off and pair: after about 20 s the toast "<model> not found. …" and `"<MODEL> pairing failed: NOT_FOUND"`.
+4. **Assistant answer on the display.** Ask a voice question from the dashboard. The answer is spoken on the phone and shows on the glasses as wrapped text; long answers continue on the next screens at a reading pace (3-12 s each). `GlassesBridge` `"Active adapter set to: mentra_display"` appears when the glasses connect. **Record** whether any line overflows or wraps a second time on the glasses (limits per model in MENTRA_AUDIT.md), and whether non-Latin text (accents, Cyrillic, CJK) shows.
+5. **Voice question through the glasses microphone.** Expect `"Question route: glasses SDK microphone, no Bluetooth call route"`, `"Capture started input=glasses SDK PCM"` and `"Microphone opened by AudioQuestionRecorder"`. The transcript must match what you said. **Record** the audio quality (G1/G2/Mentra Display send LC3, NIMO and AR99 PCM/Opus through the SDK).
+6. **Plugins.** Live Caption Relay and Hands-Free Translator show their text on the glasses; Errand Brain and Meeting Spark Notes show their cards (title on the first line). Walking Aid, Visual Diary and Auto Audio refuse with "<model> supports display and microphone plugins only."
+7. **Notifications.** With notification forwarding on, a phone notification shows as "<app>: <title>" plus the body and clears itself about 10 s after its last screen.
+8. **Reconnect on launch.** Force-stop the app with the glasses on and relaunch: `"Reconnect (startup) to <MODEL> <sdk name> requested"` and a connection without Scan. Turn Bluetooth off and on: the SDK reconnects by itself.
+9. **Switching.** Pair Mentra Live, then the display glasses again (and the reverse): each switch drops the other model's link, Device Bind does not start a Mentra Live scan while the display glasses are connected, and the answers go to the right glasses.
+10. **Head-up.** On models that report it (G1, NIMO), look up and down while text shows: `MentraLive` `"<MODEL> input head SWIPE_UP/SWIPE_DOWN"`. **Record** whether the SDK's own dashboard replaces the text while you look up, and whether the text comes back when you look down.
+
+**Even Realities G1**
+- Only the left arm appears in Scan (`Even G1_<n>_L_…`); the right arm has no row. After Connect, both arms connect (SDK log: left first, then right). The saved SDK name is the pair number `<n>`.
+- 5 lines of 40 columns per screen. G1 has no app-visible touch input in this SDK; questions start from the phone or the wake word.
+
+**Even Realities G2**
+- Only the left arm appears. The SDK picks the glasses by the serial number in their advertisement: with two G2 pairs on, pairing fails with "More than one Even Realities G2 is nearby." (expected, fail-closed).
+- 8 lines of 40 columns. Touch: long press → voice question, tap → next screen, double tap → clear (`"<MODEL> input touch LONG_PRESS|SINGLE_TAP|DOUBLE_TAP"`). **Record** the gesture names the glasses send if a gesture logs "has no action".
+
+**Mentra Display (Android only)**
+- Names `Nex1-…` or `MENTRA_DISPLAY_…`. 8 lines of 44 columns. No input events (the 3.2 driver only logs them). On iOS, choosing it shows "Mentra Display needs the Android app…".
+
+**NIMO**
+- Name starts with "nimo". The SDK pairs the Classic Bluetooth "nimo…" device; with one NIMO on, the row's glasses are picked even if the BLE row is the "…_ble" companion. 11 lines of 60 columns. Taps as for G2; head-up as for G1.
+
+**Xingyi AR99**
+- Only glasses whose advertisement carries the exact project ID "AR99" are listed as AR99. **Fail-closed check:** with AF98/AF99/HVXM/HVXF hardware (or any other ID), the row is never offered "Xingyi AR99". A device previously saved as AR99 that no longer advertises the ID is not offered either.
+- The SDK picks the glasses by the address in their advertisement; the saved SDK name is "SN: <serial>" or "MAC: <address>". 5 lines of 40 columns (G1 limits). No input events.
+
+**iOS (Mac build; G1, G2, NIMO, AR99)**
+- Pair from Scan: the bridge scans the chosen model and connects the row's CoreBluetooth identifier; AR99 also needs the "AR99" project ID. Answers show on the glasses through `display_text`. Long press/tap/double tap work as on Android when the SDK reports touch. The Mentra microphone is not streamed on iOS (voice questions use the phone route, as for Mentra Live).
+
+## Local Agent screenshots through Tasker (Android)
+
+Needs a phone with Tasker, AutoInput (Accessibility on) and the current `CyanBridge_LocalAgent_Tasker.prj.xml` imported from Plugins. Filter logcat with `adb logcat -s TaskerLocalAgent LocalAgentBrain`. Tasker's run log (Tasker → Monitoring → Run Log) shows the "CyanBridge LocalAgent Observe Handler" actions.
+
+1. **Settings screen.** Local Agent settings no longer has the "Use screenshots…" and "Allow screenshots to be sent to remote planners" switches. The Screenshot planning section shows the new description and "Screenshot status". The rest of the screen looks as before.
+2. **Onboarding text.** The accessibility disclosure in onboarding, and the dialog behind the Local Agent "Accessibility service" row, say that CyanBridge has no Accessibility service of its own and that screenshots are an off-by-default Tasker setting.
+3. **Off by default.** With `%CB_LocalAgentScreenshot` unset, run a Local Agent task (for example "Open Chrome and search for weather"). The run log shows Take Screenshot skipped (its condition is false). There is no capture prompt and no files in `/sdcard/Tasker/cyanbridge/`. Screenshot status reads "Text-only planning". The task behaves as before.
+4. **Turn it on.** In Tasker → Vars, add `%CB_LocalAgentScreenshot` = `1`. Run the same task with an on-device model that has a vision projector. Allow Tasker's screen-capture prompt if Android shows it. Screenshot status reads "Screenshot attached to the planner for this step." `/sdcard/Tasker/cyanbridge/` is empty after each step, and `adb shell run-as com.fersaiyan.cyanbridge ls cache/localagent-screenshots` is empty after the task (debug build).
+5. **Text-only model.** With a local model without vision, the task still runs. The status reads "Multimodal planning was unavailable; used text-only planning."
+6. **Pro relay.** Select the Pro planner and run a task with the step on. The status reads "Screenshot attached…". This is the case where the screenshot leaves the phone.
+7. **Blocked app.** Put the foreground app's package in `%CB_LocalAgentBlocked`. The observation returns `blocked_package:…` and no screenshot is taken.
+8. **Capture refused.** Deny Tasker's capture prompt (or revoke it). The observation still arrives within the timeout, with text only. The run log shows Take Screenshot failing and the task continuing. Note how often Android shows the prompt on this Android version, and whether the step still fits the 8 s observation timeout.
+9. **Turn it off.** Set `%CB_LocalAgentScreenshot` to `0`. The next task is text-only again.
+10. **CI HIL tests** (`LocalAiTasker*HilTest`, `LocalAgentEmailApprovalHilTest`) still pass with the variable unset on the HIL phone.
+
+## Meta hybrid registration (one build: Developer Mode or email invite)
+
+Every Android build type now carries the registered Meta app id (`1057183300587462`); debug no longer uses `"0"`. `-PmetaDatZeroAppId` builds the old developer-only setup. Design: `~/research/a11y-apps/reports/meta-dat-dual-registration-design.md`. Shared logic: `shared/.../glasses/MetaRegistration.kt`.
+
+Filter logcat with:
+`adb logcat -s DAT:CORE:RegistrationManager MetaRaybanManager MetaRegistrationNotice`
+Look for `Captured isDevMode=…` (DAT), `registrationPath: Registered through DEVELOPER_MODE|RELEASE_CHANNEL; setupChoice=…`, and `registration: Not starting registration while REGISTERED`. "Send Meta diagnostics" includes `sdkDeveloperMode=`, `setupChoice=` and `registrationPath=`.
+
+1. **30-minute validation (decides the design).** A Meta account that is **not** in the Beta channel, plus glasses. In Meta AI, turn on Developer Mode (Settings → App info → tap the version 5 times) and disconnect any other Developer-Mode app under App connections. Install a **release** build. Meta setup → "I use Developer Mode" → Register. Expect REGISTERED, `Captured isDevMode=true`, `Registered through DEVELOPER_MODE`, and "Meta AI connection: Developer Mode" on the Meta setup screen and in the dashboard's Meta panel. An error ("not authorized", or no consent screen) means a registered app id cannot serve Developer-Mode users: stop and report, the two-build fallback in the design doc then applies.
+2. **Invited user.** An account invited to the release channel, Developer Mode **off**. "Request access with my Meta email": the form button opens `cyanbridge.vercel.app/beta`; the steps say to turn Developer Mode off. Register. Expect `Captured isDevMode=false`, `Registered through RELEASE_CHANNEL`, "Meta AI connection: invited tester (release channel)". Check "Hey Meta, open CyanBridge" works.
+3. **Invited user with Developer Mode on.** Same account, Developer Mode on, email choice, Register: expect `DEVELOPER_MODE` and the hint "You are connected through Developer Mode. For “Hey Meta, open …” voice launch, turn Developer Mode off…".
+4. **Developer Mode turned off (unregister notice).** Registered through Developer Mode, CyanBridge open or in the background: turn Developer Mode off in Meta AI. Expect `registrationState: REGISTERED -> UNAVAILABLE|AVAILABLE`, `Developer Mode registration ended`, a **spoken** notice ("Meta glasses disconnected. CyanBridge is no longer connected in Meta AI…"), and a notification with a "Register again" action (needs notification permission). Meta setup shows the red notice with "Register again". Turn Developer Mode back on (Meta sends no signal), tap "Register again": Meta AI opens and registration completes.
+5. **No re-registration while registered.** While registered, tap Register in the legacy Meta controls or open the notice's "Register again": logcat shows `Not starting registration while REGISTERED` and no Meta AI screen opens; `sdkDeveloperMode=` in diagnostics is unchanged.
+6. **Unregister in CyanBridge.** Unregister: no spoken notice; `Unregistered by the user; path cleared`; the setup choices return.
+7. **Choice drives the access hint.** Release build, UNAVAILABLE, Meta AI installed, Bluetooth on: with "I use Developer Mode" chosen the primary button reads "Register CyanBridge in Meta AI" (not "Request Meta access").
+8. **Debug install.** `scripts/install_debug_keep_data.sh` still replaces the installed app and keeps data; an existing Developer-Mode registration still works (Meta AI ignores the app id on that path).
+9. **iOS (DAT 1.0, `MetaAppID` 0 in Info.plist).** The Meta panel shows the setup choice with Developer Mode only ("Access by email is not available in this version yet"); Pair no longer opens Meta AI by itself; Register does. After registering, "Meta AI connection: Developer Mode". Turning Developer Mode off speaks the notice through the assistant voice. iOS DAT 1.0 does not expose `isDevMode` publicly, so a registered iOS app id would record no path.
+
+## Spoken questions, web answers, voice profile and vision assistance (merged 2026-10-26)
+
+Merged from the retired protocol-fixes branch (`c8fc4efb`). Filter logcat with
+`adb logcat -s AIHijack ImageQuestionAudio AudioSession VoiceEnrollment SpeakerModelStore`.
+The emulator flow is covered by `GlassesQuestionFlowTest` (debug build, local Gemma 4 audio model); these checks need real glasses.
+
+1. **SMART voice question (local audio model).** Wake word on HeyCyan, then "What's the capital of France?". Expect `Spoken decision route=ANSWER`, the answer through the glasses, and `AudioSession … VOICE_COMMAND granted` / `released` around the recording. Repeat with Eyevue, Meta and Mentra.
+2. **Camera route.** "What colour are these socks?": "Okay. I'll check what you see.", then `Photo delivered to decide-once question usable=true` and an answer about the photo. Check each family's photo path (HeyCyan BLE thumbnail, Eyevue AI photo, Meta, Mentra). With the glasses unable to take a photo, the answer comes without it after at most 45 s.
+3. **Search route.** "What's the weather today?" and "When is the next holiday?": the "checking the web" cue, then `web_search engine=GOOGLE …`. Repeat in pt-BR. With phone data off, the fixed offline sentence is spoken in the app language; nothing else is read out.
+4. **Follow-ups.** Right after an answer, ask "And how many people live there?" within 5 s without the wake word. Expect `turn=2 continued=true`. Each follow-up opens its own `VOICE_COMMAND` session and reconnects the route (as before: the route is down while the answer plays); with a meeting recording running, the follow-up shares the meeting's route and the meeting is not cut.
+5. **Phone and Live routes.** "Open Chrome and search for cats" starts the Local Agent (Tasker); with Local Agent off it says to enable it. "Let's talk" opens Gemini Live; the Live session gets the microphone after the question's session is released.
+6. **Pro relay audio.** Pro account whose questions model the relay lists with `supports_audio`: the question goes as audio (no on-device transcript). With a non-audio model, on-device STT runs first, as before.
+7. **Cold load cue and errors.** After a reboot, the first question speaks "Initializing local model" once. A model failure speaks the short failure cue, never the error text.
+8. **Classic mode.** Settings → AI & automation → Question routing → Classic: questions are transcribed first and follow the AI button's route. The routing options are absent on iOS.
+9. **Voice profile.** Settings → Voice profile → Enroll my voice (and onboarding step 4 of 5): microphone prompt, three phrases on the phone microphone, `VoiceEnrollment VOICE_COMMAND granted`/`released` per phrase. With Gemini Live running, recording shows "Microphone is in use" instead of taking the microphone. Delete voice profile, and Settings → Clear local data, remove `no_backup/voiceprint`.
+10. **Vision assistance.** Fresh install with TalkBack on: the welcome flow asks "Do you need vision assistance?" first. Turn TalkBack on after onboarding: the question is offered once at the next launch. Settings → Accessibility: TalkBack reads the toggle as one switch with its description. The same toggle works on iOS.
+
+## A3: glasses questions moved out of MainActivity (`ai/questions`), Mentra and MemoMind hooks
+
+The image, voice and spoken-decision question flows moved from MainActivity to `app/.../ai/questions` (`GlassesQuestions` and its parts); the decision-model turns now run the shared `SpokenQuestionFlow`. Nothing should look, sound or time differently. Filter logcat with
+`adb logcat -s AIHijack ImageQuestionAudio ImageQuestionTransfer ImageQuestion GeminiLive AudioSession MentraLive MemoMindManager MemoMindHud`.
+
+**Regression (every family that has these flows; repeat the families from "Spoken questions…" above):**
+1. **Test voice (dashboard), Classic and SMART.** Same cue, beep, "Listening for voice query…" toast, answer and foreground notification as before. With the microphone permission revoked: the permission prompt, then the question. Ask a second question while one runs: "A voice question is already active".
+2. **Wake word / AI button (HeyCyan 0x03, Eyevue wake word).** SMART question (`Spoken decision route=…`), camera, search, phone, live and ignore routes; follow-up within 5 s continues (`turn=2 continued=true`). Same as "Spoken questions…" checks 1–7.
+3. **Image questions per family.** HeyCyan hardware AI-photo button (0x02) and Test image (thumbnail, and Detailed/Wi-Fi), Eyevue AI photo, TuneBuds fast and Detailed (hotspot), Meta DAT photo: same toasts ("Triggering glasses camera…", "<source>: <w>x<h>, …"), ask window ("Ask about the image now…"), answer, then the follow-up window (ask again within ~3 s after the answer). A second press while one transfers logs `… AI photo capture already in progress`. During an Eyevue, Meta or Mentra photo a voice question is refused ("An image question is already active"); during a TuneBuds photo it is not (unchanged).
+4. **Detours.** Pro with a Live questions model: "Initializing Live." then Gemini Live (with the Stop Live snackbar on the dashboard). Phone assistant route: the photo goes to Gemini/ChatGPT by share or Tasker AutoInput, and the Tasker voice broadcast still fires. Tasker route: relay answer.
+5. **Activity teardown.** Start a voice question and leave the app with Back (activity destroyed) while it listens: the question stops, the foreground notification goes away and `AudioQuestionRecorder VOICE_COMMAND released restoredRoute=true` returns the audio mode to normal, as before (unless a meeting or Live still uses the route).
+6. **Lock screen.** With the phone locked, a wake-word voice question shows over the lock screen and asks to dismiss the keyguard, as before.
+
+**Mentra Live (MENTRA_AUDIT.md, "Question flow hooks"):**
+7. **Image question.** Button press and Test image: see the Mentra section, check 7. The photo is answered as a fast preview; during the transfer a long press is refused.
+8. **SDK microphone route.** See the Mentra section, check 8: no Bluetooth call route around the question, and Gemini Live (if running) keeps its microphone.
+9. **Playback signal.** During a spoken answer (relay, local streamed photo answer, decision flow) the glasses treat the app's audio as playing (note any change in the glasses' own sounds or microphone echo compared with before); after the answer it is cleared, now also when the answer is cut off (a new question, leaving the screen).
+
+**MemoMind (README, "Questions (Android)"):**
+10. **Answer on the HUD.** Ask by voice (button or Test voice): the answer appears on the glasses (Web Bridge text box with the plugin running, else the teleprompter) when it starts being spoken. Other display glasses (MYVU) do not show answers.
+11. **Background button question.** Open CyanBridge, connect MemoMind, then remove CyanBridge from recents (the SPP link stays up) or open another app and let Android destroy the activity. Long-press: `AIHijack Background voice question source=memomind screen=false`, the cue on the glasses. Same with Mentra Live: press asks about a photo (`source=mentra`), long press asks a voice question; Mentra records the SDK PCM and is answered whatever Android decides below. With the microphone permission revoked: a toast, no prompt. With Local selected but no local model: a toast with the setup message.
+    MemoMind questions record the glasses' Opus link (route `DEVICE_SDK`), which needs no phone microphone, so the background question is heard and answered on every Android version: `Question SDK stream ready, recording from +N ms`, no `Question foreground microphone=` line and no "Android blocked the microphone" sentence. Record the Android version, N and what was spoken. Also check with the screen off and the phone locked.
+    Only the HFP fallback (link unavailable, see the MemoMind section, check 5) records through the phone's Bluetooth input, which Android only lets an app use while it has a visible screen or a microphone foreground service started while it had one. Test it when the fallback happens (firmware without the link, or after the fallback line of the MemoMind section, check 5), asking from the background. Expected per Android version (record the version and the log lines):
+    - Android 12+ without a background-start exemption: `AiQuestionForegroundService Unable to request AI question foreground service` and `Question foreground microphone=REFUSED`.
+    - Android 14+ with the start allowed (for example battery optimization off for CyanBridge): `Microphone foreground service refused (app not visible)`, `Question foreground microphone=REFUSED`, and the service keeps running without the microphone type. The app must not crash about 10 s later.
+    - Android 10–13 with the start allowed: `Question foreground microphone=GRANTED`, but Android still silences the recording.
+    - In every fallback case: the beep and cue, then `Question recording silenced by Android` and "Android blocked the microphone while CyanBridge was in the background. Open CyanBridge and ask again." (Android 9 cannot report silencing: "I couldn't hear a voice question".) With a meeting recording, Gemini Live or a voice plugin already running from the screen, the fallback question is heard.
+12. **Foreground unchanged.** With CyanBridge open (or only in the background, not destroyed), the buttons still press the dashboard's Test voice / Test image buttons (setup dialog when needed); no `Background … question` log line.
+
+**iOS (Mac build):**
+13. MemoMind voice question: after the spoken answer, the text appears on the HUD. A relay photo answer that says the image could not be seen is spoken as "I couldn't analyze the image. Please try again."
+
+
+## Single Activity: every screen is a destination of MainActivity (`ui/nav`)
+
+Branch `cyan-refactor-single-activity`. The manifest went from 43 Activities to 6. Every other screen is a route of MainActivity's back stack (`AppRoute`, `AppNavigator`, `NavScreen`), with its old lifecycle, results and back handling. The six that remain: MainActivity; the `.ui.MetaPairingActivity` and `.agent.ProSubscriptionActivity` link trampolines; `WebSubscriptionCallbackActivity`; the Gemini Live permission gate; and MemoMind Web plugins. The launcher icon is an alias of MainActivity named `.ui.WelcomeActivity`, and MainActivity is `singleTask`. Screens should look as before; what changed is how they open and close.
+
+Check the Activity stack with `adb shell dumpsys activity activities | grep -E "Hist|mResumed"`: in normal use only `MainActivity` is listed. Screen readers announce each screen's old title as its pane title.
+
+1. **Navigation.**
+   - From the glasses screen, open each tab: Chats (the last chat if you wrote in it in the last 30 minutes, else a new one), Media, Plugins, Settings. Then switch between tabs from each tab's own bar.
+   - Tapping a tab that is already open below returns to it and drops the screens above, as before. Glasses always returns to the glasses screen.
+   - Open the nested screens: Settings → Appearance, Language, Pro, Local models, Voice profile, Assistant automation setup; Plugins → each plugin's settings, Publish, Walking Aid chat, AutoDiary → captures, summary and daily facts, Local Agent → pending actions; Chats → note editor, Notes & Chats list; Media → synced photos and videos.
+   - Also open: device bind (Scan, Reconnect), Meta setup, the Mentra firmware update and broadcast screens, and Gemini Live (Pro settings → Start Live, with notifications declined so the visible preview opens).
+   - No screen should open twice or flash a blank window. Screens now switch without the old window animations, including the onboarding fade.
+2. **Back.**
+   - Back walks the same path as before, then leaves the app from the glasses screen.
+   - Screens that handle Back themselves still do: the Mentra firmware update refuses Back during an update, Local models backs out of its sub-pages, the Mentra miniapps screen closes a miniapp's UI or the store first, and the voice profile steps back.
+   - Onboarding (fresh install, or clear data): Welcome → battery guide → feature steps (voice profile is step 4) → glasses screen. Back on an onboarding step leaves the app, as before, and nothing glasses-related runs until onboarding ends: no Bluetooth or permission prompts over Welcome.
+   - Glasses connected: while a tab or settings screen covers the glasses screen, battery polling and the glasses event listener pause, as when those were separate Activities. Back to the glasses screen resumes them, refreshes the plugin shortcuts and asks for any permissions newly enabled plugins need.
+3. **Rotation.** Rotate on each screen above. The screen stays, with its state (the chat being typed, plugin settings, the Pro plan picker, the Local models page, the device-bind scan resets and rescans as before), and Back afterwards still walks the same stack.
+   - Local models used to handle rotation itself; it is now recreated like the others, so check that a running download keeps reporting progress after a rotation.
+   - Mentra firmware update and broadcast keep the screen on only while they are in front.
+4. **Results and permissions.** These ActivityResult flows now return to the screen inside MainActivity. Check each one, including after a rotation while the picker or prompt is open:
+   - Settings export, import, ChatGPT and Claude import;
+   - the chat image picker and the chat wallpaper;
+   - the Local models file import;
+   - Obsidian vault picker; Tasker profile save (Plugins, Assistant automation setup);
+   - the device-bind "turn on Bluetooth" request;
+   - the Meta setup permissions and the glasses camera permission;
+   - the microphone prompts (chat, voice profile, Gemini Live);
+   - the Walking Aid and Auto Audio permission prompts (they start from the plugin screen as before).
+5. **Notifications.**
+   - Tap each "open" notification: AI question, Gemini Live, meeting capture, the live previews, MYVU, Local Agent, Auto Audio, the plugins, Studio bridge, model download (opens Local models), the daily facts reminder (opens the review chat). The right screen should open in the running app, without a second copy of the app in recents.
+   - Meta "Register again": see 7.
+6. **Deep links and entry points.**
+   - The launcher icon, and a home-screen shortcut pinned before this build (it points at `.ui.WelcomeActivity`), open the app.
+   - `adb shell am start -a android.intent.action.VIEW -d "fersaiyan://pro-sub/restore"` opens the Pro screen on top of the running app; Back returns to where you were.
+   - A web checkout return (`https://cyanbridge.vercel.app/web-subscribe/callback`) opens Pro settings on success, else the Pro screen.
+   - Tasker: the HIL profiles (`tools/hil/sync_tasker_profiles.sh`, which opens `.hil.HilTaskerProfileImportActivity`) and the AutoDiary, Visual Diary, Local Agent and AI image broadcasts are unchanged and run without opening a screen. A Tasker command intent sent to MainActivity (`<package>.ACTION_TASKER_COMMAND`) still runs and shows the glasses screen.
+   - CI HIL tests (`HilFixtureActivity`) and `GlassesQuestionFlowTest` (MainActivity) still pass.
+7. **Meta registration (see "Meta hybrid registration" above; repeat checks 1, 2 and 4).**
+   - Registration now starts from MainActivity, which receives Meta AI's activity result. Expect `Captured isDevMode=…` and the `registrationPath` line as before.
+   - Meta AI's `cyanbridge://` return lands on the open Meta setup screen (through the `.ui.MetaPairingActivity` trampoline), which refreshes; no second Meta setup screen opens.
+   - "Register again" from the notification opens or reuses the Meta setup screen, and registration starts once it is in front. Also check this with the app killed first: the Meta setup screen opens alone, and Back shows the glasses screen.
+   - The "Test AI image question" button returns to the glasses screen and starts the question.
+8. **Lock screen.** A wake-word question while the phone is locked shows the glasses screen over the lock screen, as before. Locked, with a settings screen on top: that screen does not show over the lock screen, and unlocking shows it.
+
+## Mentra miniapps (experimental; see MENTRA_MINIAPPS.md)
+
+Filter logcat with `adb logcat -s MentraMiniapps MentraMiniappJs MentraMiniappUi MentraMiniappService PluginVoiceSupport GlassesBridge`.
+
+1. **Plugins page by device.** Select each family in Device Bind and open Plugins.
+   - HeyCyan, Eyevue, TuneBuds, W620, Meta: only the native plugins (and Tasker integrations, community list) as before.
+   - MemoMind: a "MemoMind Web plugins" section whose Open button shows the existing `.mmpkg` host, then a "Mentra miniapps" section.
+   - MYVU and Mentra Live: a "Mentra miniapps" section only. Mentra display models added later appear here when their profile has `TEXT_DISPLAY`.
+   - The Mentra section's switch is off on first run; Open is disabled until it is on. Turning it off stops every running miniapp.
+   - The rest of the page looks as before (hero, notice, native cards, period filter, rankings).
+2. **Install from a URL.** Turn the switch on, Open, paste `https://miniapps.mentraglass.com/com.mentra.teleprompter/` and tap Install from URL.
+   - The install dialog names the host and version, lists MICROPHONE and the trust note. Install. Expect `com.mentra.teleprompter` in the list with its icon.
+   - Paste `https://example.com/` (no miniapp: "No miniapp was found"), `http://…` (refused) and a URL whose package does not match its domain (refused with the domain-rule message).
+   - Tap Update on the installed copy: "up to date" (a 304 with the stored ETag). Nothing is downloaded again.
+3. **Store.** Browse the Mentra Miniapp Store: about 10 listings with icons, categories and versions; search filters. Install Captions from the store (resolved to the public first-party URL). A listing outside `com.mentra.*` without a public URL says to use the Mentra App; "Store page" opens apps.mentraglass.com.
+4. **Consent and start.** Open Captions: the permission dialog lists Microphone (required). Allow: Android asks for the microphone (and notifications) the first time. Deny the required one: nothing starts.
+5. **Captions on MemoMind and on MYVU (connected).**
+   - Open Captions, keep the default language. The notification "A miniapp is listening for speech" appears (microphone foreground service).
+   - Speak: captions appear on the glasses within about a second, at most one update every 300 ms, the newest text at the end; the miniapp UI shows the transcript.
+   - Change lines/width in the UI: the glasses layout follows.
+   - Back closes the UI; captions keep appearing on the glasses (the background runs). Stop (in the list or the notification's "Stop miniapps") clears the glasses and removes the notification.
+   - Check the audio coordination: start a glasses question while Captions listens; listening pauses and resumes (the plugin recognizer's audio session).
+6. **Teleprompter on MemoMind / MYVU.**
+   - Paste a script, set the speed, Play: lines scroll on the glasses; Pause, Restart, Seek and the line nudges work from the UI.
+   - Voice follow (AI Scroll): the script advances as you read aloud.
+   - On Mentra Live (no display) Teleprompter refuses to start ("needs display").
+7. **Buttons.** With a miniapp that uses `input.onButtonPress` (the Mentra example app), press the MemoMind or Mentra Live button: short and long presses reach the miniapp (`button_press`), taps and swipes arrive as `touch_event`.
+8. **Robustness.**
+   - Rotate with a miniapp UI open: the UI reloads and re-hydrates from the background (snapshot), the background is not restarted.
+   - Kill the app process while a miniapp runs: it does not restart by itself (no autostart yet); reopening it starts it fresh.
+   - Recorder (background-only, needs audio chunks and blobs): it starts, its unsupported calls answer NOT_IMPLEMENTED in the Log, and nothing crashes.
+   - Remove a miniapp: its files, storage and permission choices are gone; reinstalling asks for permissions again.
+
+## iOS first-run setup (shared `OnboardingFlowViewModel`)
+
+iPhone with the KMP host build (`ios/CyanBridgeKMPHost`). Filter the device log (Console.app) on `IosBleManager` and `IosLocalModels`. Android onboarding is unchanged; on Android only re-check that the model step still lists the same three models with the same "Requirements" lines.
+
+1. **Fresh install, VoiceOver off.** Delete the app first, then install and open it.
+   - No Bluetooth alert on the welcome card. The note under "Get started" reads "About 1 minute · You stay in control".
+   - Changing the language on the welcome card keeps you on the welcome card.
+   - "Get started" leads to four steps, shown as "1 / 4" to "4 / 4": Connect your glasses, Choose your on-device AI, Ask out loud, Welcome to CyanBridge. There is no battery, accessibility, Tasker, Plugins or voice-profile step, and no "Local / Pro / Tasker" label.
+   - Glasses step: "Allow glasses connection" shows the iOS Bluetooth alert; after "Allow" the card reads "Bluetooth access is allowed". "Find available glasses" opens Device Bind over the setup, pairs as usual, and returns to the step.
+   - Glasses step, refused: "Next" asks "Continue without Bluetooth?". After a refusal, the button reads "Open Settings" and opens CyanBridge's page in the Settings app.
+   - Model step: it shows the iPhone's RAM. The recommended starter is preselected (Gemma 4 E2B with 6 GB or more, Qwen3.5 0.8B with 4 GB), models that need more RAM are greyed out, and "No on-device model for now" is listed. "Next" starts the download (Settings → Local models shows its progress); with "No on-device model" nothing downloads.
+   - Voice step: the button shows the microphone alert, then the speech-recognition alert, and the card turns to allowed. With either refused, the button reads "Open Settings".
+   - Last step: "Open CyanBridge on GitHub" opens the repository. "Get started" opens the app on the Glasses tab. The Glasses screen selects the custom-provider assistant mode.
+   - Relaunch: no setup is shown. Force-quit during setup, then relaunch: setup starts again at the welcome card.
+   - "Skip all" on the first step opens the app, and setup does not come back.
+2. **Fresh install, VoiceOver on.**
+   - "Do you need vision assistance?" comes first, with "Yes" preselected. "Continue" leads to the welcome card.
+   - VoiceOver reads every control on every step: the language selector, the step counter, the permission buttons, the model radio choices and Back/Next.
+   - After setup, Settings → Accessibility shows vision assistance on.
+3. **VoiceOver turned on later.**
+   - Finish setup with VoiceOver off. Turn VoiceOver on, either with the app open or from Settings followed by a return to the app: the vision-assistance question appears once, over the app.
+   - Answer "No", then turn VoiceOver off and on again: the question does not come back.
+4. **Upgrade from a build that showed only the welcome card** (`cyanbridge_onboarding/welcome_done` = true; for example the collaborator's build or cyan-refactor before this branch).
+   - Install over it without deleting. The app opens straight to the dashboard, with no setup steps.
+   - On first launch Bluetooth starts as before: the dashboard shows the Bluetooth state, and reconnecting to the saved glasses works.
+   - With VoiceOver on and vision assistance never answered, the vision-assistance question is shown once, as on Android.
+
+## HeyCyan media sync: three selectable flows (branch `cyan-refactor-sync-modes`, owner decision 2026-11-11; integrated with the P2P fixes in `cyan-refactor-integration`, add.224)
+
+Real HeyCyan glasses on an Android phone; Wi-Fi on, VPN off unless a step says otherwise. Filter logcat with `adb logcat -s DataDownload DeviceNotify WifiP2pManagerSingleton GlassesNetSession`. Each Sync tap still shows the official-app warning first when HeyCyan is installed, then the picker with three entries: "HeyCyan app flow", "Custom flow" and "Adaptive flow" with an "Experimental" tag. Settings → Media sync reads "Ask every time" until a flow is chosen there; with a flow chosen, Sync skips the picker (log `"Using the sync flow remembered in Settings: …"`), and full-resolution image questions use the same flow (Custom while it is "Ask every time").
+
+| Flow | Steps | Expect |
+|---|---|---|
+| HeyCyan app flow | Sync with photos, a video and audio on the glasses. Repeat with Settings → Media sync set to "HeyCyan app flow". | `"Sync session flow=HeyCyan app flow"`. Unchanged from cyan-refactor: exact peer only, plain system routing (`"skipping explicit P2P network binding"`), error 255 stops with a toast. Files land in the gallery and Recordings; `adb shell run-as com.fersaiyan.cyanbridge ls shared_prefs` shows no new `adaptive_p2p_sync_profiles.xml` entries from this sync. |
+| Custom flow (v2.3.0 resolver) | Sync. Then sync with the phone as group owner if you can force it, with a VPN on, and once while another Wi-Fi Direct device (TV, printer) is visible. | `"Sync session flow=Custom flow"`, transfer card "Flow: Custom flow". `"Bound process to P2P network"` right after the group forms; `"Resolving glasses HTTP IP..."` every 5 s; the BLE IP is tried up to 3 times (`"media.config probe attempt n/3"`), `192.168.49.1` is never probed when the phone owns the group, and `"Resolved glasses HTTP IP via candidate list: …"`. Without the glasses peer: `"Retrying P2P discovery (n/3)"`, then the "P2P sync failed" peer dialog; "Try Again" restarts the sync. A refused transfer command is retried after a `[0x02,0x01,0x0F]` reset. Error 255 before the media list: `resetDeviceP2p`, at most every 10 s. No HTTP within 45 s: "Could not resolve glasses HTTP IP …". No `"Adaptive …"` lines and no change to `adaptive_p2p_sync_profiles.xml`. The `/24` scan line (`"scanning …0/24"`) is not expected: as in v2.3.0 it only runs when no glasses IP is known, and the resolver starts only after one is reported. |
+| Adaptive flow (experimental) | Sync twice in a row; on the second, check the learned route is tried first. Once with a VPN on. | `"Sync session flow=Adaptive flow"`, toast "Starting sync using Adaptive flow…", transfer card "Flow: Adaptive flow". `"Adaptive sync profile=…"`, checkpoint recovery lines (`"Adaptive recovery: …"` only when stuck), `"Adaptive flow resolved media.config: ip=… route=…"`, then `"Adaptive profile learned success"`; the second sync starts with that route. Error 255 is deferred to checkpoint recovery. Behavior matches the old "Custom" entry of cyan-refactor before this branch. |
+
+**Added by the integration (add.210/219/223 fixes on the three flows, 2026-11-12).** Same phone and glasses, logcat as above plus `GLASSES_LOG`:
+
+| Check | Steps | Expect |
+|---|---|---|
+| VPN-safe route, Custom | Custom flow with a VPN on (any always-on VPN app), photos + one video. | `"VPN active — forcing VPN-safe LOCAL_ADDRESS for CUSTOM download (requested P2P_NETWORK)"` on each transfer; files land as without the VPN. The resolver probes before it are unchanged (no forcing line during `"Resolving glasses HTTP IP..."`). |
+| VPN-safe route, Adaptive | Adaptive flow with the VPN on. | `"VPN active — forcing VPN-safe LOCAL_ADDRESS for ADAPTIVE download (requested …)"` unless the learned route already is `LOCAL_ADDRESS`. |
+| HeyCyan app flow keeps system routing | HeyCyan app flow with the VPN on. | No `"forcing VPN-safe"` line; `"skipping explicit P2P network binding"` as before. |
+| Range-resume (Custom and Adaptive) | Sync a long video and move the phone to the edge of Wi-Fi Direct range mid-transfer so the body stalls or resets (turning Wi-Fi Direct off drops the group, so it does not test resume). | On a truncated or reset body the transfer continues with `Range` (Adaptive also logs a `MEDIA_FILE_RETRY` checkpoint with `resume=n,offset=…`); the saved video plays to the end. No duplicate or short file. |
+| cmd-65 short frame (all flows) | Any sync. | No `ArrayIndexOutOfBoundsException` in `GLASSES_LOG`; when the glasses send a short cmd-65 notify, `"dropping short/truncated cmd-65 frame (len=…)"` and the sync continues. |
+| **P2P join not torn down by our own reset (add.223 §4; all three flows)** | Pre-fix build `98016354` first if available, then this build. ~10 syncs per flow, `adb logcat -v time`. | Between `"Connect request sent successfully"` and `"P2P connected"`: **no** `"Internal scan retry connection once"`, **no** `"resetDeviceP2p called"` (BLE `a->w：bc410300…02010f`), no `P2P-GROUP-REMOVED … reason=REQUESTED`; instead `"Discovery timeout deferred <n>ms: P2P join in flight"` when the timer fires during the join (~connect+4.0 s HeyCyan, ~+2.0 s Custom/Adaptive). Also never during a join: `"restartPeerDiscovery skipped: P2P join in flight"` / `"Skipping pre-retry P2P reset: P2P join in flight"` / `"Skipping resetDeviceP2p on error=255 … P2P join in flight"` may appear and are expected. Record connect → `P2P-GROUP-STARTED` time for each sync (emulator: 4.02–4.07 s); if real joins are > 4 s, the pre-fix build should fail the HeyCyan flow. |
+| Battery frame | Dashboard after connect. | Battery shows a percentage; a short 0x42 frame logs `"BatteryResponse: short/truncated 0x42 battery frame"` and nothing crashes. |
+
+## EyeVue and TuneBuds firmware updates from the dashboard (branch `cyan-refactor-family-ota`, owner request 2026-11-17)
+
+Dashboard → Advanced → "Firmware update" now shows a family section for EyeVue and TuneBuds (HeyCyan keeps its own section, unchanged). Filter logcat with `adb logcat -s FamilyOta EyevueManager TuneBudsManager`. Every row needs the glasses charged to **at least 50%** (EyeVue vendor minimum; no TuneBuds vendor minimum is known, so the same value is used), switched on and out of the case. Keep a stock image for the model at hand before you start (EyeVue: `firmware_dump/Pure_Firmware_Dumps/EYEVUE_<model>_<version>_ble.ufw`; TuneBuds: the bundle `.zip` built from the unit's base firmware). These paths were only tested on the simulators (`sim/e2e`, evidence in `/mnt/seagate/ML/cyan-refactor-wt/family-ota-evidence-20261117/`).
+
+| Check | Steps | Expect |
+|---|---|---|
+| Section and facts (both) | Connect the glasses, open Advanced. | "Model … · firmware …": EyeVue shows the cmd-100 code (e.g. `S3CY02`) and the RCSP version (`1.4.3` on the owner's unit); TuneBuds the 0x86 model and 0x27 version. The warning card names 50%. No HeyCyan "Choose OTA files" button. |
+| Blocked while busy (both) | Start a media sync, then open the section; repeat during live preview, during a voice question and with Gemini Live on. | Red line "Stop the media sync or live preview first." / "Wait until the voice question, Gemini Live or recording ends."; the buttons are disabled; a tap that slips through gives the same toast. With the battery under 50%: "Charge the glasses to at least 50% first (now n%)." |
+| EyeVue official check | "Check for updates". | Logcat has no error; on the owner's S3CY02 at 1.4.3 the vendor server publishes only 1.3.6, so the result is "These glasses have the latest official firmware." Never offers a version that is not newer. |
+| EyeVue official install (only on glasses older than the published version) | "Update to x" → acknowledge → Continue. | Downloading %, "Checking the firmware file…", Installing % (RCSP, the glasses restart once or twice: "The glasses are restarting…"), then "Update finished" with the new version. Logcat `FamilyOta: Installing OFFICIAL … sha256 …`. If the package has a Wi-Fi part, the note says the camera keeps its firmware: install that part with the EyeVue app. |
+| EyeVue file install | "Install a firmware file" → acknowledge → pick the stock `.ufw` for this model (or the customization `.zip`). | Installs as above. A `.ufw` for another model (e.g. `EYEVUE_S3S100_1.4.3_ble.ufw` on S3CY02) is refused before anything is sent: "This firmware is for EyeVue model S3S100, but these glasses are S3CY02." A damaged file is refused with a CRC message. |
+| EyeVue cancel | Start a file install, tap Cancel while "Preparing"/"Checking", then again during "Installing". | Before the transfer: "Update cancelled", the glasses keep their firmware. During the transfer: dual-bank glasses stop with E4 ("Stopped. The glasses keep the firmware they had."); single-bank glasses say "This update cannot be stopped safely now…" and the Cancel button is disabled; record which bank mode the unit reports (`RcspTargetInfo.doubleBackup`). |
+| TuneBuds bundle install | "Install a firmware file" → acknowledge → the customization `.zip` for this unit's firmware. | Installing % over SPP, then "Update finished … The glasses apply it and restart". A `.zip` built for another base version is refused ("built for firmware x, but the glasses run y"); a bare `.fot` is refused (no model information in the file). |
+| TuneBuds cancel | Cancel at ~30%, then install again. | "Update cancelled"; the second install resumes (the glasses' 0xA0 answer starts past 0) and finishes. |
+| HeyCyan regression | HeyCyan glasses: Advanced → OTA. | The HeyCyan section, source picker and combined Wi-Fi + BLE update behave exactly as before this branch. |
+
+**Recovery if an install fails.**
+1. Keep the glasses powered and charging. Do not put them in the case or switch them off.
+2. EyeVue, dual-bank (`doubleBackup`): the old firmware keeps running. Reconnect in CyanBridge and repeat "Install a firmware file" with the stock `.ufw` for the model.
+3. EyeVue, single-bank: if the glasses come back only as the update loader (they advertise but CyanBridge's EyeVue connection fails, only GATT service AE00 is present), run the update from the official EyeVue app: it detects the mandatory update and reinstalls its published image. CyanBridge can resume a mandatory update only when it can connect. Record what the glasses advertise for the worklog.
+4. TuneBuds: the glasses verify the whole image before applying it, so a failed transfer leaves the old firmware running. Reconnect and install again (it resumes). If the glasses do not boot after "Update finished", put them on the charger for 10 minutes, then use the vendor TuneBuds app's update.
+5. Send the `FamilyOta` logcat and the file's sha256 (in the `Installing …` log line) with the report.

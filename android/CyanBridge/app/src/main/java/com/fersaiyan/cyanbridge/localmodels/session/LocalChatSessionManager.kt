@@ -1,0 +1,601 @@
+package com.fersaiyan.cyanbridge.localmodels.session
+
+import com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents
+import com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticLevel
+import com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem
+import android.content.Context
+import android.util.Log
+import com.fersaiyan.cyanbridge.BuildConfig
+import com.fersaiyan.cyanbridge.ai.decision.DecisionCandidate
+import com.fersaiyan.cyanbridge.ai.decision.LocalDecision
+import com.fersaiyan.cyanbridge.ai.decision.NextTokenDecisionRuntime
+import com.fersaiyan.cyanbridge.ai.decision.SharedGemmaDecisionEngine
+import com.fersaiyan.cyanbridge.localmodels.engine.SharedGemmaInferenceEngine
+import com.fersaiyan.cyanbridge.localmodels.catalog.LocalModelCatalogEntry
+import com.fersaiyan.cyanbridge.localmodels.device.DeviceCapabilityService
+import com.fersaiyan.cyanbridge.localmodels.engine.EngineLoadConfig
+import com.fersaiyan.cyanbridge.localmodels.engine.GenerationConfig
+import com.fersaiyan.cyanbridge.localmodels.engine.GenerationResult
+import com.fersaiyan.cyanbridge.localmodels.engine.DecideOnceRequest
+import com.fersaiyan.cyanbridge.localmodels.engine.LiteRtLocalInferenceEngine
+import com.fersaiyan.cyanbridge.localmodels.engine.SessionTurn
+import com.fersaiyan.cyanbridge.localmodels.engine.SessionUnavailableException
+import com.fersaiyan.cyanbridge.localmodels.engine.LlamaCppLocalInferenceEngine
+import com.fersaiyan.cyanbridge.localmodels.engine.LocalInferenceEngine
+import com.fersaiyan.cyanbridge.localmodels.settings.LocalComputeBackend
+import com.fersaiyan.cyanbridge.localmodels.settings.LocalGenerationSettings
+import com.fersaiyan.cyanbridge.localmodels.settings.LocalModelRuntime
+import com.fersaiyan.cyanbridge.localmodels.provider.LocalModelRequestPriority
+import com.fersaiyan.cyanbridge.localmodels.storage.InstalledLocalModel
+import com.fersaiyan.cyanbridge.localmodels.storage.LocalModelStorageRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.UUID
+
+sealed class LocalSessionState {
+    data object Idle : LocalSessionState()
+    data object ModelNotLoaded : LocalSessionState()
+    data class Loading(val modelId: String) : LocalSessionState()
+    data class Ready(val modelId: String) : LocalSessionState()
+    data class Generating(val modelId: String, val requestId: String) : LocalSessionState()
+    data class Error(val message: String) : LocalSessionState()
+}
+
+data class LocalSessionSnapshot(
+    val state: LocalSessionState,
+    val loadedModelId: String?,
+    val loadedModelPath: String?,
+    val activeRequestId: String?,
+    val activeBackend: LocalComputeBackend?,
+    val gpuFallbackMessage: String?,
+)
+
+data class LocalModelLoadDetails(
+    val activeBackend: LocalComputeBackend,
+    val activeGpuLayers: Int,
+    val fallbackReason: String?,
+)
+
+data class LocalWarmupProbeResult(
+    val promptTokens: Int,
+    val generatedTokens: Int,
+    val elapsedMs: Long,
+    val backend: LocalComputeBackend,
+    val fallbackReason: String?,
+    /** Request to first streamed token; null when nothing streamed or no generation ran. */
+    val firstTokenMs: Long? = null,
+) {
+    val totalTokens: Int get() = (promptTokens + generatedTokens).coerceAtLeast(1)
+}
+
+object LocalChatSessionManager {
+    private const val APPROX_CHARS_PER_TOKEN = 4
+    private const val TOKEN_GUARD_SAFETY_MARGIN = 1
+
+    private val mutex = Mutex()
+    private val generationMutex = Mutex()
+
+    private var engine: LocalInferenceEngine? = null
+    private var loadedModelId: String? = null
+    private var loadedModelPath: String? = null
+    private var loadedConfig: EngineLoadConfig? = null
+    private var activeBackend: LocalComputeBackend? = null
+    private var activeGpuLayers: Int = 0
+    private var gpuFallbackMessage: String? = null
+    private var activeRequestId: String? = null
+    private var pendingHighPriorityRequests: Int = 0
+    private var activeRequestPriority: LocalModelRequestPriority? = null
+    private var lastGenerationCappedByMaxTokens: Boolean = false
+    private var state: LocalSessionState = LocalSessionState.ModelNotLoaded
+
+    /** One line for support reports; reads without the lock, so it never waits on a running generation. */
+    fun diagnosticsSummary(): String {
+        val model = loadedModelPath?.substringAfterLast('/') ?: return "no model loaded (${state::class.simpleName})"
+        return "$model on ${activeBackend ?: "?"}, gpu_layers=$activeGpuLayers, state=${state::class.simpleName}" +
+            (gpuFallbackMessage?.let { ", fallback: $it" } ?: "")
+    }
+
+    suspend fun snapshot(): LocalSessionSnapshot = mutex.withLock {
+        LocalSessionSnapshot(
+            state = state,
+            loadedModelId = loadedModelId,
+            loadedModelPath = loadedModelPath,
+            activeRequestId = activeRequestId,
+            activeBackend = activeBackend,
+            gpuFallbackMessage = gpuFallbackMessage,
+        )
+    }
+
+    suspend fun ensureModelLoaded(
+        context: Context,
+        model: InstalledLocalModel,
+        catalogEntry: LocalModelCatalogEntry?,
+        settings: LocalGenerationSettings,
+    ): LocalModelLoadDetails {
+        return generationMutex.withLock { mutex.withLock {
+            Log.i(
+                TAG,
+                "ensureModelLoaded model=${model.displayName} runtime=${settings.modelRuntime} backend=${settings.computeBackend} context=${settings.contextSize} gpuLayers=${settings.gpuLayers}",
+            )
+            val file = File(model.absolutePath)
+            if (!file.exists()) {
+                LocalModelStorageRepository.removeInstalled(context, model.id)
+                state = LocalSessionState.Error("Selected local model file is missing")
+                throw IllegalStateException("Selected model file is missing. Re-import or download again.")
+            }
+
+            val capabilityEntry = catalogEntry ?: LocalModelCatalogEntry(
+                id = model.id,
+                displayName = model.displayName,
+                family = "custom",
+                sourceUrl = null,
+                sourcePageUrl = null,
+                expectedFilename = model.fileName,
+                sha256 = model.sha256,
+                sizeBytes = model.sizeBytes,
+                quantization = model.quantization ?: "unknown",
+                contextSizeDefault = settings.contextSize,
+                promptTemplateId = model.promptTemplateId
+                    ?: com.fersaiyan.cyanbridge.localmodels.templates.PromptTemplateRegistry.inferForFileName(model.fileName)
+                    ?: "generic_chatml",
+                minRamGb = 4.0,
+                minStorageGb = 0.5,
+                shortDescription = "Imported GGUF model",
+                tags = listOf("offline"),
+                gatedDownload = false,
+                licenseTermsNote = model.licenseTermsNote ?: "Respect the source model license.",
+                enabled = true,
+            )
+
+            val capability = DeviceCapabilityService.assess(
+                snapshot = DeviceCapabilityService.snapshot(context),
+                entry = capabilityEntry,
+                requireDownloadHeadroom = false,
+            )
+            if (!capability.supported) {
+                state = LocalSessionState.Error(capability.blockers.joinToString(" "))
+                throw IllegalStateException(capability.blockers.joinToString(" "))
+            }
+
+            val loadConfig = EngineLoadConfig(
+                contextSize = settings.contextSize.coerceIn(
+                    LocalGenerationSettings.MIN_CONTEXT_SIZE,
+                    LocalGenerationSettings.MAX_CONTEXT_SIZE,
+                ),
+                cpuThreads = settings.cpuThreads.coerceIn(1, 16),
+                computeBackend = settings.computeBackend,
+                gpuLayers = settings.gpuLayers.coerceIn(-1, 999),
+                projectorPath = com.fersaiyan.cyanbridge.localmodels.storage.LocalModelProjectorStore.get(context, model),
+            )
+
+            if (
+                loadedModelId == model.id &&
+                loadedModelPath == model.absolutePath &&
+                loadedConfig == loadConfig &&
+                isEngineCompatibleWithRuntime(settings.modelRuntime)
+            ) {
+                state = LocalSessionState.Ready(model.id)
+                return@withLock LocalModelLoadDetails(
+                    activeBackend = activeBackend ?: settings.computeBackend,
+                    activeGpuLayers = if (activeBackend == LocalComputeBackend.GPU || activeBackend == LocalComputeBackend.NPU_EXPERIMENTAL) {
+                        activeGpuLayers
+                    } else {
+                        0
+                    },
+                    fallbackReason = gpuFallbackMessage,
+                )
+            }
+
+            if (engine != null && !isEngineCompatibleWithRuntime(settings.modelRuntime)) {
+                runCatching { engine?.unloadModel() }
+                engine = null
+            }
+
+            state = LocalSessionState.Loading(model.id)
+            LocalModelLoadAnnouncer.shared.onColdLoadStarted(model.id)
+            val llm = engine ?: createEngine(settings.modelRuntime, context).also { engine = it }
+
+            runCatching {
+                try {
+                    llm.loadModel(
+                        modelPath = model.absolutePath,
+                        config = loadConfig,
+                    )
+                } finally {
+                    LocalModelLoadAnnouncer.shared.onColdLoadFinished()
+                }
+            }.onFailure {
+                Log.e(TAG, "Failed to load local model ${model.displayName}", it)
+                DiagnosticEvents.error(
+                    DiagnosticSubsystem.MODEL, "model load failed",
+                    mapOf("model" to model.displayName, "runtime" to settings.modelRuntime.name, "backend" to settings.computeBackend.name),
+                    it,
+                )
+                state = LocalSessionState.Error(it.message ?: "Failed to load local model")
+                throw it
+            }.onSuccess { loadResult ->
+                Log.i(
+                    TAG,
+                    "Local model loaded model=${model.displayName} activeBackend=${loadResult.activeBackend} fallback=${loadResult.fallbackReason}",
+                )
+                activeBackend = loadResult.activeBackend
+                activeGpuLayers = loadResult.activeGpuLayers
+                gpuFallbackMessage = loadResult.fallbackReason
+                DiagnosticEvents.record(
+                    if (loadResult.fallbackReason != null) DiagnosticLevel.WARN else DiagnosticLevel.INFO,
+                    DiagnosticSubsystem.MODEL, "model loaded",
+                    buildMap {
+                        put("model", model.displayName)
+                        put("runtime", settings.modelRuntime.name)
+                        put("requested", settings.computeBackend.name)
+                        put("active", loadResult.activeBackend.name)
+                        put("gpu_layers", loadResult.activeGpuLayers.toString())
+                        loadResult.fallbackReason?.let { put("fallback", it) }
+                    },
+                )
+            }
+
+            loadedModelId = model.id
+            loadedModelPath = model.absolutePath
+            loadedConfig = loadConfig
+            state = LocalSessionState.Ready(model.id)
+
+            return@withLock LocalModelLoadDetails(
+                activeBackend = activeBackend ?: settings.computeBackend,
+                activeGpuLayers = if (activeBackend == LocalComputeBackend.GPU || activeBackend == LocalComputeBackend.NPU_EXPERIMENTAL) {
+                    activeGpuLayers
+                } else {
+                    0
+                },
+                fallbackReason = gpuFallbackMessage,
+            )
+        } }
+    }
+
+    /** Scores only with an already-loaded capable chat engine; never loads weights. */
+    suspend fun scoreSharedGemmaShadow(state: String, candidates: List<DecisionCandidate>): LocalDecision? {
+        if (!BuildConfig.SHARED_GEMMA_PROTOTYPE && !BuildConfig.LITERT_DECISION_PROTOTYPE) return null
+        waitForHighPriorityRequestsToDrain()
+        return generationMutex.withLock {
+            val runtime = mutex.withLock { engine as? NextTokenDecisionRuntime } ?: return@withLock null
+            if (runtime is LiteRtLocalInferenceEngine && !BuildConfig.LITERT_DECISION_PROTOTYPE) return@withLock null
+            SharedGemmaDecisionEngine(runtime).choose(state, candidates, "shared-gemma-shadow")
+        }
+    }
+
+    suspend fun streamGenerate(
+        settings: LocalGenerationSettings,
+        prompt: String,
+        onToken: (String) -> Unit,
+        imagePaths: List<String> = emptyList(),
+        audioPath: String? = null,
+        requestPriority: LocalModelRequestPriority = LocalModelRequestPriority.HIGH,
+        maxTokensOverride: Int? = null,
+        systemInstruction: String? = null,
+        decideOnce: DecideOnceRequest? = null,
+        session: SessionTurn? = null,
+    ): String {
+        return generateInternal(
+            settings = settings,
+            prompt = prompt,
+            onToken = onToken,
+            imagePaths = imagePaths,
+            audioPath = audioPath,
+            requestPriority = requestPriority,
+            maxTokensOverride = maxTokensOverride,
+            systemInstruction = systemInstruction,
+            decideOnce = decideOnce,
+            session = session,
+        ).also { lastSessionTokens = it.sessionTokens }.text
+    }
+
+    /** Estimated tokens held by the open engine session after the last [streamGenerate] (null without one). */
+    @Volatile var lastSessionTokens: Int? = null
+        private set
+
+    /** True when the loaded engine can run a [DecideOnceRequest] (keeps a conversation across turns). */
+    suspend fun supportsDecideOnce(): Boolean = mutex.withLock { engine is LiteRtLocalInferenceEngine }
+
+    suspend fun consumeLastGenerationCappedFlag(): Boolean = mutex.withLock {
+        val capped = lastGenerationCappedByMaxTokens
+        lastGenerationCappedByMaxTokens = false
+        capped
+    }
+
+    private suspend fun generateInternal(
+        settings: LocalGenerationSettings,
+        prompt: String,
+        onToken: (String) -> Unit,
+        imagePaths: List<String>,
+        audioPath: String?,
+        requestPriority: LocalModelRequestPriority,
+        maxTokensOverride: Int? = null,
+        systemInstruction: String? = null,
+        decideOnce: DecideOnceRequest? = null,
+        session: SessionTurn? = null,
+    ): GenerationResult {
+        val reqId = UUID.randomUUID().toString()
+        val llm: LocalInferenceEngine
+        val modelId: String
+
+        Log.i(
+            TAG,
+            "generateInternal requestId=$reqId priority=$requestPriority promptChars=${prompt.length} images=${imagePaths.size} hasAudio=${!audioPath.isNullOrBlank()} maxTokensOverride=${maxTokensOverride ?: -1}",
+        )
+
+        if (requestPriority == LocalModelRequestPriority.HIGH) {
+            mutex.withLock {
+                pendingHighPriorityRequests += 1
+            }
+        }
+
+        mutex.withLock {
+            llm = engine ?: throw IllegalStateException("Local engine not initialized")
+            modelId = loadedModelId ?: throw IllegalStateException("No local model loaded")
+        }
+        // Other engines would silently answer without the photo; callers fall back instead.
+        if (decideOnce != null && llm !is LiteRtLocalInferenceEngine) {
+            if (requestPriority == LocalModelRequestPriority.HIGH) {
+                mutex.withLock { pendingHighPriorityRequests = (pendingHighPriorityRequests - 1).coerceAtLeast(0) }
+            }
+            throw DecideOnceUnsupportedException()
+        }
+        // Only LiteRT-LM keeps a conversation open between requests.
+        if (session?.continueExisting == true && llm !is LiteRtLocalInferenceEngine) {
+            if (requestPriority == LocalModelRequestPriority.HIGH) {
+                mutex.withLock { pendingHighPriorityRequests = (pendingHighPriorityRequests - 1).coerceAtLeast(0) }
+            }
+            throw SessionUnavailableException("This model runtime does not keep sessions")
+        }
+
+        if (requestPriority == LocalModelRequestPriority.LOW) {
+            waitForHighPriorityRequestsToDrain()
+        }
+
+        var highPendingConsumed = false
+        try {
+            return generationMutex.withLock {
+                mutex.withLock {
+                    check(engine === llm && loadedModelId == modelId) { "Chat model changed while request was queued" }
+                    if (requestPriority == LocalModelRequestPriority.HIGH) {
+                        pendingHighPriorityRequests = (pendingHighPriorityRequests - 1).coerceAtLeast(0)
+                        highPendingConsumed = true
+                    }
+                    lastGenerationCappedByMaxTokens = false
+                    activeRequestId = reqId
+                    activeRequestPriority = requestPriority
+                    state = LocalSessionState.Generating(modelId, reqId)
+                }
+
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val maxTokens = (maxTokensOverride ?: settings.maxTokens).coerceAtLeast(1)
+                        val streamedText = StringBuilder()
+                        var approxGeneratedTokens = 0
+                        var guardTriggered = false
+                        var raw: GenerationResult? = null
+
+                        try {
+                            raw = llm.generate(
+                                config = GenerationConfig(
+                                    prompt = prompt,
+                                    temperature = settings.temperature,
+                                    topP = settings.topP,
+                                    topK = settings.topK,
+                                    maxTokens = maxTokens,
+                                    repetitionPenalty = settings.repetitionPenalty,
+                                    seed = settings.seed,
+                                    structuredJson = settings.experimentalStructuredJson,
+                                    imagePaths = imagePaths,
+                                    audioPath = audioPath,
+                                    systemInstruction = systemInstruction,
+                                    decideOnce = decideOnce,
+                                    session = session,
+                                ),
+                                onToken = { chunk ->
+                                    // Newline-only chunks matter: they end a spoken-decision payload line.
+                                    if (chunk.isEmpty() || guardTriggered) return@generate
+
+                                    streamedText.append(chunk)
+                                    onToken(chunk)
+
+                                    approxGeneratedTokens += estimateApproxTokens(chunk)
+                                    if (approxGeneratedTokens >= (maxTokens + TOKEN_GUARD_SAFETY_MARGIN)) {
+                                        guardTriggered = true
+                                        runCatching {
+                                            runBlocking { llm.cancelGeneration() }
+                                        }
+                                    }
+                                },
+                            )
+                        } catch (err: Throwable) {
+                            if (!guardTriggered) throw err
+                        }
+
+                        val preferredText = if (streamedText.isNotBlank()) {
+                            streamedText.toString()
+                        } else {
+                            raw?.text.orEmpty()
+                        }
+
+                        val guardedText = truncateToApproxTokens(preferredText, maxTokens)
+                        val guardedTokenCount = (raw?.tokenCount ?: 0)
+                            .coerceAtLeast(estimateApproxTokens(guardedText))
+                            .coerceAtMost(maxTokens)
+                        val capped = guardTriggered ||
+                            guardedTokenCount >= maxTokens ||
+                            estimateApproxTokens(preferredText) > maxTokens ||
+                            (raw?.cappedByMaxTokens == true)
+
+                        GenerationResult(
+                            text = guardedText,
+                            tokenCount = guardedTokenCount,
+                            cappedByMaxTokens = capped,
+                            sessionTokens = raw?.sessionTokens,
+                        )
+                    }
+                }
+
+                mutex.withLock {
+                    activeRequestId = null
+                    activeRequestPriority = null
+                    result.fold(
+                        onSuccess = {
+                            lastGenerationCappedByMaxTokens = it.cappedByMaxTokens
+                            state = LocalSessionState.Ready(modelId)
+                            it
+                        },
+                        onFailure = { err ->
+                            Log.e(TAG, "Local generation failed requestId=$reqId", err)
+                            DiagnosticEvents.error(
+                                DiagnosticSubsystem.MODEL, "generation failed",
+                                mapOf("backend" to (activeBackend?.name ?: "?")), err,
+                            )
+                            lastGenerationCappedByMaxTokens = false
+                            state = LocalSessionState.Error(err.message ?: "Local generation failed")
+                            throw err
+                        },
+                    )
+                }
+            }
+        } finally {
+            if (requestPriority == LocalModelRequestPriority.HIGH && !highPendingConsumed) {
+                mutex.withLock {
+                    pendingHighPriorityRequests = (pendingHighPriorityRequests - 1).coerceAtLeast(0)
+                }
+            }
+        }
+    }
+
+    private suspend fun waitForHighPriorityRequestsToDrain() {
+        while (true) {
+            val shouldWait = mutex.withLock {
+                pendingHighPriorityRequests > 0 || activeRequestPriority == LocalModelRequestPriority.HIGH
+            }
+            if (!shouldWait) return
+            delay(120L)
+        }
+    }
+
+    private fun estimateApproxTokens(text: String): Int {
+        if (text.isBlank()) return 0
+        return (text.length / APPROX_CHARS_PER_TOKEN).coerceAtLeast(1)
+    }
+
+    private fun truncateToApproxTokens(text: String, maxTokens: Int): String {
+        if (text.isBlank()) return text
+        val cap = maxTokens.coerceAtLeast(1) * APPROX_CHARS_PER_TOKEN
+        if (text.length <= cap) return text
+        return text.take(cap).trimEnd()
+    }
+
+    suspend fun cancelActiveGeneration() {
+        val llm = mutex.withLock { engine } ?: return
+        Log.i(TAG, "Cancelling active local generation")
+        runCatching { llm.cancelGeneration() }
+    }
+
+    suspend fun unload() {
+        generationMutex.withLock { mutex.withLock {
+            Log.i(TAG, "Unloading local chat session modelId=${loadedModelId.orEmpty()}")
+            runCatching { engine?.unloadModel() }
+            loadedModelId = null
+            loadedModelPath = null
+            loadedConfig = null
+            activeBackend = null
+            activeGpuLayers = 0
+            gpuFallbackMessage = null
+            activeRequestId = null
+            state = LocalSessionState.ModelNotLoaded
+        } }
+    }
+
+    suspend fun runWarmupProbe(
+        settings: LocalGenerationSettings,
+        onToken: (String) -> Unit,
+    ): LocalWarmupProbeResult {
+        val backend = mutex.withLock { activeBackend ?: settings.computeBackend }
+        val isAccel = backend == LocalComputeBackend.GPU || backend == LocalComputeBackend.NPU_EXPERIMENTAL
+        val benchmarkPrompt = if (isAccel) {
+            "Reply with only: OK"
+        } else {
+            "Count numbers from 1 to 20 separated by spaces on one line."
+        }
+        val warmupTokens = if (isAccel) {
+            settings.maxTokens.coerceIn(4, 12)
+        } else {
+            settings.maxTokens.coerceIn(16, 48)
+        }
+
+        val start = System.currentTimeMillis()
+        var firstTokenAt = 0L
+        val result = generateInternal(
+            settings = settings.copy(
+                maxTokens = warmupTokens,
+                experimentalStructuredJson = false,
+            ),
+            prompt = benchmarkPrompt,
+            onToken = { token ->
+                if (firstTokenAt == 0L && token.isNotEmpty()) firstTokenAt = System.currentTimeMillis()
+                onToken(token)
+            },
+            imagePaths = emptyList(),
+            audioPath = null,
+            requestPriority = LocalModelRequestPriority.HIGH,
+        )
+        val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+
+        val llm = mutex.withLock { engine }
+        val promptTokens = try {
+            llm?.tokenizeCount(benchmarkPrompt)?.coerceAtLeast(1) ?: 1
+        } catch (_: Throwable) {
+            1
+        }
+        val generatedTokens = try {
+            llm?.tokenizeCount(result.text)?.coerceAtLeast(1)
+        } catch (_: Throwable) {
+            null
+        }
+            ?: result.tokenCount.coerceAtLeast(1)
+
+        val fallback = mutex.withLock { gpuFallbackMessage }
+
+        return LocalWarmupProbeResult(
+            promptTokens = promptTokens,
+            generatedTokens = generatedTokens,
+            elapsedMs = elapsed,
+            backend = backend,
+            fallbackReason = fallback,
+            firstTokenMs = firstTokenAt.takeIf { it > 0L }?.let { it - start },
+        )
+    }
+
+    private fun isEngineCompatibleWithRuntime(runtime: LocalModelRuntime): Boolean {
+        val currentEngine = engine ?: return false
+        return when (runtime) {
+            LocalModelRuntime.LLAMA_CPP -> if (BuildConfig.SHARED_GEMMA_PROTOTYPE) currentEngine is SharedGemmaInferenceEngine else currentEngine is LlamaCppLocalInferenceEngine
+            LocalModelRuntime.LITERT -> currentEngine is LiteRtLocalInferenceEngine
+            LocalModelRuntime.REMOTE_OPENAI -> false
+        }
+    }
+
+    private fun createEngine(runtime: LocalModelRuntime, context: Context): LocalInferenceEngine {
+        return when (runtime) {
+            LocalModelRuntime.LLAMA_CPP -> if (BuildConfig.SHARED_GEMMA_PROTOTYPE) SharedGemmaInferenceEngine() else LlamaCppLocalInferenceEngine()
+            LocalModelRuntime.LITERT -> LiteRtLocalInferenceEngine(context)
+            LocalModelRuntime.REMOTE_OPENAI -> throw IllegalStateException(
+                "REMOTE_OPENAI does not use a local engine. Requests go through RemoteOpenAiClient."
+            )
+        }
+    }
+
+    private const val TAG = "LocalChatSession"
+}
+
+/** The loaded engine cannot keep a conversation across turns, so it cannot run a decide-once turn. */
+class DecideOnceUnsupportedException : IllegalStateException("Decide-once questions need a LiteRT-LM model")

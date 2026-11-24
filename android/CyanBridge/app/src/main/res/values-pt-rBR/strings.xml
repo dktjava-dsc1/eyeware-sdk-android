@@ -1,0 +1,85 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">Padrão do sistema</string>
+    <string name="language_selection_title">Escolha o idioma do aplicativo</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_save">Salvar</string>
+    <string name="walking_aid_title">Auxílio para Caminhada</string>
+    <string name="walking_aid_settings">Configurações do Auxílio para Caminhada</string>
+    <string name="walking_aid_general">Geral</string>
+    <string name="walking_aid_capture_interval">Intervalo de captura</string>
+    <string name="walking_aid_image_recognition">Reconhecimento de Imagem</string>
+    <string name="walking_aid_depth_estimation">Estimativa de Profundidade</string>
+    <string name="walking_aid_output">Saída</string>
+    <string name="walking_aid_tts_enabled">Falar descrições em voz alta</string>
+    <string name="walking_aid_safety_disclaimer">Aviso de segurança no primeiro alerta</string>
+    <string name="walking_aid_history">Histórico de Imagens</string>
+    <string name="walking_aid_clear_history">Limpar Histórico</string>
+    <string name="walking_aid_source_local">Local (no dispositivo)</string>
+    <string name="walking_aid_source_cloud">Nuvem (Pro)</string>
+    <string name="walking_aid_not_connected">Walking Aid: Óculos não conectados. Conecte seus óculos primeiro.</string>
+    <string name="walking_aid_meeting_active">Walking Aid: Gravação de reunião ativa. Pare a reunião antes de ativar o Walking Aid.</string>
+    <string name="onboarding_glasses_connection_title">Conecte seus óculos</string>
+    <string name="onboarding_glasses_connection_desc">Permita que o CyanBridge encontre e conecte seus óculos próximos.</string>
+    <string name="onboarding_glasses_connection_details">A permissão Bluetooth é usada somente para encontrar, emparelhar e se comunicar com seus óculos. Você pode continuar sem permiti-la agora e concedê-la depois ao conectar um dispositivo.</string>
+    <string name="onboarding_optional_features_title">Recursos opcionais, você escolhe</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent e os recursos Pro são opcionais e configurados em Plugins.</string>
+    <string name="onboarding_optional_features_details">Comece conectando os óculos e explore Plugins quando quiser. Cada plugin explica o que faz e solicita apenas as permissões necessárias ao ser ativado. Você pode revisar ou desativar os recursos a qualquer momento.</string>
+    <string name="onboarding_open_source_title">Boas-vindas ao CyanBridge</string>
+    <string name="onboarding_open_source_desc">Tudo pronto. Conecte seus óculos, explore os recursos e deixe o CyanBridge do seu jeito.</string>
+    <string name="onboarding_open_source_details">O CyanBridge é um projeto open source feito pela comunidade e para a comunidade. Você pode consultar o código, relatar problemas, sugerir ideias ou contribuir diretamente pelo nosso repositório no GitHub.</string>
+    <string name="onboarding_bluetooth_skip_title">Continuar sem Bluetooth?</string>
+    <string name="onboarding_bluetooth_skip_body">Você poderá conceder essa permissão posteriormente. Até lá, o CyanBridge não conseguirá encontrar, emparelhar nem conectar seus óculos.</string>
+    <string name="onboarding_bluetooth_skip_confirm">Continuar mesmo assim</string>
+    <string name="onboarding_bluetooth_skip_cancel">Voltar</string>
+    <string name="onboarding_find_glasses">Procurar óculos disponíveis</string>
+    <string name="onboarding_skip_all">Pular tudo</string>
+    <string name="onboarding_back">Voltar</string>
+    <string name="onboarding_next">Avançar</string>
+    <string name="onboarding_get_started">Começar</string>
+    <string name="meta_diagnostics_title">Diagnóstico do Meta Ray-Ban</string>
+    <string name="meta_diagnostics_description">O CyanBridge coletará o estado recente do Meta DAT, erros, detalhes do dispositivo e entradas filtradas do logcat para investigar o problema.</string>
+    <string name="nav_transcriptions_recordings">Mídias</string>
+    <string name="text_10">Emparelhar por BT</string>
+    <string name="text_11">Registrar listener de relatórios</string>
+    <string name="text_16">Exibir informações do servidor OTA</string>
+    <string name="text_17">Testar OTA no modo pull (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">Manter o CyanBridge em execução</string>
+    <string name="battery_opt_not_supported">As configurações de otimização de bateria não estão disponíveis nesta versão do Android.</string>
+    <string name="battery_opt_cant_open_settings">Não foi possível abrir as configurações neste dispositivo.</string>
+
+
+
+    <string name="onboarding_local_model_title">Escolha sua IA no dispositivo</string>
+    <string name="onboarding_local_model_desc">Escolha um modelo inicial. O CyanBridge fará o download em segundo plano enquanto você termina a configuração.</string>
+    <string name="onboarding_local_model_details">As configurações de geração são selecionadas automaticamente para o modelo, com preferência pela aceleração da GPU. Você poderá alterar ou importar modelos mais tarde em Modelos locais.</string>
+    <string name="onboarding_device_ram">Este aparelho: %.1f GB de RAM</string>
+    <string name="onboarding_ram_warning_title">Memória limitada</string>
+    <string name="onboarding_ram_limited">Este aparelho tem %.1f GB de RAM. Recomendamos apenas IAs locais compactas; modelos maiores podem ficar lentos ou fechar inesperadamente.</string>
+    <string name="onboarding_ram_too_low">Este aparelho tem apenas %.1f GB de RAM. A IA local exige pelo menos 4 GB, portanto nenhum modelo local é compatível no momento. Você pode continuar e configurar uma IA na nuvem ou remota depois.</string>
+    <string name="onboarding_accessibility_disclosure_title">Informações sobre o acesso à Acessibilidade</string>
+    <string name="onboarding_accessibility_disclosure_body">O CyanBridge não tem um serviço de Acessibilidade próprio. A Memória da tela e o agente local funcionam pelo Tasker e pelo AutoInput: o serviço de Acessibilidade do AutoInput lê o texto e a estrutura da interface do aplicativo na sua tela e permite que o agente local toque, digite, role e navegue em seu nome. Você mesmo ativa a Acessibilidade do AutoInput; o CyanBridge nunca a ativa. O conteúdo da tela é armazenado localmente para a Memória da tela. Quando você pede algo ao agente local, o conteúdo atual da tela pode ser processado pelo provedor de IA escolhido, incluindo um provedor na nuvem se você tiver escolhido um. As capturas de tela são opcionais e ficam desativadas por padrão. Você as ativa no perfil do Tasker CyanBridge Local Agent; a partir daí, cada captura de planejamento é enviada ao planejador escolhido, incluindo um planejador na nuvem ou Pro. Aplicativos que você bloquear no Tasker são ignorados. Você pode desativar a Acessibilidade do AutoInput, a Memória da tela ou o agente local a qualquer momento.</string>
+    <string name="meta_pairing_title">Emparelhar óculos Meta</string>
+
+
+    <string name="chat_deleted">Chat excluído</string>
+    <string name="synced_media_folder_hint">Exibindo arquivos de: %1$s</string>
+    <string name="synced_media_open_failed">Não foi possível abrir este item de mídia.</string>
+
+    <string name="donation_intro_dialog_title">Nota de apoio ao CyanBridge via Asaas</string>
+    <string name="donation_intro_dialog_message">Olá, obrigado por considerar uma doação ao CyanBridge! Trabalho neste projeto além dos meus estudos de doutorado, e seu apoio significa muito para mim. Ainda não consegui configurar o Stripe devido aos requisitos especiais para empresas brasileiras, então por enquanto uso um processador de pagamentos chamado Asaas. A página de checkout está em português; use o Google Tradutor se necessário. Estou procurando ativamente uma alternativa melhor. Obrigado novamente pelo seu apoio!</string>
+    <string name="donation_intro_open_button">Abrir formulário de cartão Asaas</string>
+    <string name="meta_registration_channel_name">Conexão dos óculos Meta</string>
+    <string name="meta_registration_lost_title">Óculos Meta desconectados</string>
+    <string name="meta_registration_lost_dev_mode_text">O CyanBridge não está mais conectado no Meta AI. Provavelmente o Modo de desenvolvedor foi desativado. Ative-o de novo no Meta AI e registre o CyanBridge de novo.</string>
+    <string name="meta_registration_lost_invite_text">O CyanBridge não está mais conectado no Meta AI. Mantenha o Modo de desenvolvedor desativado e registre o CyanBridge de novo.</string>
+    <string name="meta_registration_register_again">Registrar de novo</string>
+    <string name="voice_profile_status_none">Não cadastrado. Três frases curtas permitem que o CyanBridge aprenda sua voz. As respostas ainda não são filtradas.</string>
+    <string name="voice_profile_status_enrolled">Cadastrado em %1$s. As respostas ainda não são filtradas.</string>
+    <string name="voice_profile_status_model_ready">Modelo de voz: %1$s (instalado)</string>
+    <string name="voice_profile_status_model_missing">Modelo de voz: %1$s (ainda não instalado; suas frases ficam guardadas até lá)</string>
+    <string name="voice_profile_delete_title">Excluir perfil de voz?</string>
+    <string name="voice_profile_delete_body">Isso remove deste celular suas frases gravadas e os modelos da sua voz.</string>
+    <string name="voice_profile_delete_confirm">Excluir</string>
+</resources>

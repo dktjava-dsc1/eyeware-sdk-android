@@ -1,0 +1,76 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">Systemstandard</string>
+    <string name="language_selection_title">App-Sprache auswählen</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_save">Speichern</string>
+    <string name="walking_aid_title">Gehhilfe</string>
+    <string name="walking_aid_settings">Gehhilfe-Einstellungen</string>
+    <string name="walking_aid_general">Allgemein</string>
+    <string name="walking_aid_capture_interval">Aufnahmeintervall</string>
+    <string name="walking_aid_image_recognition">Bilderkennung</string>
+    <string name="walking_aid_depth_estimation">Tiefenschätzung</string>
+    <string name="walking_aid_output">Ausgabe</string>
+    <string name="walking_aid_tts_enabled">Beschreibungen vorlesen</string>
+    <string name="walking_aid_safety_disclaimer">Sicherheitshinweis bei erster Warnung</string>
+    <string name="walking_aid_history">Bildverlauf</string>
+    <string name="walking_aid_clear_history">Verlauf löschen</string>
+    <string name="walking_aid_source_local">Lokal (auf dem Gerät)</string>
+    <string name="walking_aid_source_cloud">Cloud (Pro)</string>
+    <string name="walking_aid_not_connected">Walking Aid: Brille nicht verbunden. Bitte verbinden Sie zuerst Ihre Brille.</string>
+    <string name="walking_aid_meeting_active">Walking Aid: Meeting-Aufnahme ist aktiv. Stoppen Sie die Aufnahme, bevor Sie Walking Aid aktivieren.</string>
+    <string name="onboarding_glasses_connection_title">Brille verbinden</string>
+    <string name="onboarding_glasses_connection_desc">Erlauben Sie CyanBridge, Ihre Brille in der Nähe zu finden und zu verbinden.</string>
+    <string name="onboarding_glasses_connection_details">Die Bluetooth-Berechtigung wird nur zum Finden, Koppeln und Kommunizieren mit Ihrer Brille verwendet. Sie können jetzt ohne Erlaubnis fortfahren und sie später beim Verbinden eines Geräts erteilen.</string>
+    <string name="onboarding_optional_features_title">Optionale Funktionen, Ihre Wahl</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent und Pro-Funktionen sind optional und werden unter Plugins eingerichtet.</string>
+    <string name="onboarding_optional_features_details">Verbinden Sie zuerst die Brille und entdecken Sie Plugins, wann Sie bereit sind. Jedes Plugin erklärt seine Funktion und fordert beim Aktivieren nur die benötigten Berechtigungen an. Sie können Funktionen jederzeit prüfen oder deaktivieren.</string>
+    <string name="onboarding_open_source_title">Offen entwickelt</string>
+    <string name="onboarding_open_source_desc">Prüfen Sie den Code, melden Sie Probleme und helfen Sie, CyanBridge für alle zu verbessern.</string>
+    <string name="onboarding_open_source_details">CyanBridge ist Open Source. Untersuchen Sie den Code, melden Sie Fehler oder Sicherheitsprobleme, schlagen Sie Verbesserungen vor oder tragen Sie über GitHub bei.</string>
+    <string name="onboarding_skip_all">Alle überspringen</string>
+    <string name="onboarding_back">Zurück</string>
+    <string name="onboarding_next">Weiter</string>
+    <string name="onboarding_get_started">Loslegen</string>
+    <string name="meta_diagnostics_title">Meta-Ray-Ban-Diagnose</string>
+    <string name="meta_diagnostics_description">CyanBridge sammelt den aktuellen Meta-DAT-Status, Fehler, Gerätedetails und gefilterte Logcat-Einträge, damit das Problem untersucht werden kann.</string>
+    <string name="nav_transcriptions_recordings">Medien</string>
+    <string name="text_10">BT-Kopplung</string>
+    <string name="text_11">Berichtslistener registrieren</string>
+    <string name="text_16">OTA-Serverinformationen ausgeben</string>
+    <string name="text_17">Pull-Modus-OTA testen (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">CyanBridge aktiv halten</string>
+    <string name="battery_opt_not_supported">Die Einstellungen der Akkuoptimierung sind in dieser Android-Version nicht verfügbar.</string>
+    <string name="battery_opt_cant_open_settings">Die Einstellungen konnten auf diesem Gerät nicht geöffnet werden.</string>
+
+
+
+    <string name="onboarding_local_model_title">Lokale KI auswählen</string>
+    <string name="onboarding_local_model_desc">Wählen Sie ein Startmodell. CyanBridge lädt es im Hintergrund herunter, während Sie die Einrichtung abschließen.</string>
+    <string name="onboarding_local_model_details">Die Generierungseinstellungen werden automatisch für das Modell ausgewählt und GPU-Beschleunigung wird bevorzugt. Später können Sie Modelle unter Lokale Modelle ändern oder importieren.</string>
+    <string name="onboarding_accessibility_disclosure_title">Hinweis zum Zugriff auf Bedienungshilfen</string>
+    <string name="onboarding_accessibility_disclosure_body">CyanBridge hat keinen eigenen Bedienungshilfen-Dienst. Bildschirmgedächtnis und der lokale Agent arbeiten über Tasker und AutoInput: Der Bedienungshilfen-Dienst von AutoInput liest Text und Struktur der Benutzeroberfläche der App auf Ihrem Bildschirm und lässt den lokalen Agenten in Ihrem Namen tippen, Text eingeben, scrollen und navigieren. Sie aktivieren die Bedienungshilfe von AutoInput selbst; CyanBridge schaltet sie nie ein. Bildschirminhalte für das Bildschirmgedächtnis werden lokal gespeichert. Wenn Sie den lokalen Agenten um etwas bitten, können aktuelle Bildschirminhalte vom ausgewählten KI-Anbieter verarbeitet werden, einschließlich eines Cloud-Anbieters, falls Sie einen solchen gewählt haben. Screenshots sind optional und standardmäßig aus. Sie schalten sie im Tasker-Profil „CyanBridge Local Agent“ ein; danach geht jeder Planungs-Screenshot an den ausgewählten Planer, auch an einen Cloud- oder Pro-Planer. Apps, die Sie in Tasker sperren, werden übersprungen. Sie können die Bedienungshilfe von AutoInput, das Bildschirmgedächtnis oder den lokalen Agenten jederzeit deaktivieren.</string>
+    <string name="meta_pairing_title">Meta-Brille koppeln</string>
+
+
+    <string name="chat_deleted">Chat gelöscht</string>
+    <string name="synced_media_folder_hint">Dateien aus folgendem Ordner: %1$s</string>
+    <string name="synced_media_open_failed">Dieses Medienelement kann nicht geöffnet werden.</string>
+
+    <string name="donation_intro_dialog_title">CyanBridge-Asaas-Unterstützungshinweis</string>
+    <string name="donation_intro_dialog_message">Hallo, danke, dass Sie eine Spende an CyanBridge erwägen! Ich arbeite neben meiner Promotion an diesem Projekt, und Ihre Unterstützung bedeutet mir viel. Ich konnte Stripe noch nicht einrichten, da dort besondere Anforderungen für brasilianische Unternehmen gelten. Daher verwende ich vorerst den Zahlungsdienstleister Asaas. Die Checkout-Seite ist auf Portugiesisch; verwenden Sie bei Bedarf Google Übersetzer. Ich suche aktiv nach einer besseren Alternative. Nochmals vielen Dank für Ihre Unterstützung!</string>
+    <string name="donation_intro_open_button">Asaas-Kartenformular öffnen</string>
+    <string name="meta_registration_channel_name">Verbindung der Meta-Brille</string>
+    <string name="meta_registration_lost_title">Meta-Brille getrennt</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge ist in Meta AI nicht mehr verbunden. Wahrscheinlich wurde der Entwicklermodus ausgeschaltet. Schalte ihn in Meta AI wieder ein und registriere CyanBridge dann erneut.</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge ist in Meta AI nicht mehr verbunden. Lass den Entwicklermodus aus und registriere CyanBridge dann erneut.</string>
+    <string name="meta_registration_register_again">Erneut registrieren</string>
+    <string name="voice_profile_status_none">Nicht eingelernt. Mit drei kurzen Sätzen lernt CyanBridge deine Stimme. Antworten werden noch nicht gefiltert.</string>
+    <string name="voice_profile_status_enrolled">Eingelernt am %1$s. Antworten werden noch nicht gefiltert.</string>
+    <string name="voice_profile_status_model_ready">Stimmmodell: %1$s (installiert)</string>
+    <string name="voice_profile_status_model_missing">Stimmmodell: %1$s (noch nicht installiert; deine Sätze bleiben bis dahin gespeichert)</string>
+    <string name="voice_profile_delete_title">Stimmprofil löschen?</string>
+    <string name="voice_profile_delete_body">Dadurch werden deine aufgenommenen Sätze und Stimmvorlagen von diesem Telefon entfernt.</string>
+    <string name="voice_profile_delete_confirm">Löschen</string>
+</resources>

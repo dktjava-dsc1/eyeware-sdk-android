@@ -1,0 +1,520 @@
+package com.fersaiyan.cyanbridge.ui.wifi.p2p
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pDeviceList
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import androidx.core.content.ContextCompat
+import com.heycyan.core.connectivity.p2p.WifiP2pConnectionState
+import com.heycyan.core.connectivity.p2p.WifiP2pRetryState
+import com.oudmon.ble.base.communication.LargeDataHandler
+import java.util.concurrent.CopyOnWriteArrayList
+
+class WifiP2pManagerSingleton private constructor(private val context: Context) {
+
+    companion object {
+        private const val TAG = "WifiP2pManagerSingleton"
+        @Volatile
+        private var instance: WifiP2pManagerSingleton? = null
+
+        /** Last known P2P group owner IP, cached for live preview and other features. */
+        var lastGroupOwnerIp: String? = null
+            internal set
+
+        fun getInstance(context: Context): WifiP2pManagerSingleton {
+            return instance ?: synchronized(this) {
+                instance ?: WifiP2pManagerSingleton(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    private val wifiP2pManager: WifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+    private var wifiP2pChannel: WifiP2pManager.Channel? = null
+    private var wifiP2pDevice: WifiP2pDevice? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val callbacks = CopyOnWriteArrayList<WifiP2pCallback>()
+
+    private val discoveryTimeoutMs = 16_000L
+    private val connectTimeoutMs = 5_000L
+    // Upper bound for one join (provision discovery + WPS + 4-way + DHCP). The framework's
+    // "disconnected" broadcast at the start of a join clears connectionState, so the join is
+    // tracked here instead; a join that never completes stops blocking the timeout after this.
+    private val groupFormationWindowMs = 15_000L
+    @Volatile private var connectInFlightSinceMs = 0L
+    private val delayedPeerDiscoveryRestart = Runnable {
+        startPeerDiscovery(allowDeviceResetOnTimeout = allowDeviceResetOnDiscoveryTimeout)
+    }
+
+    private val connectionState = WifiP2pConnectionState()
+    private val retryState = WifiP2pRetryState(1, 1)
+    @Volatile private var p2pOperationsEnabled = true
+    @Volatile private var allowDeviceResetOnDiscoveryTimeout = true
+
+    private val intentFilter = IntentFilter().apply {
+        addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+        addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+        addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+        addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+    }
+
+    private var receiver: BroadcastReceiver? = null
+
+    private fun hasWifiP2pPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.NEARBY_WIFI_DEVICES
+        } else {
+            Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun canUseP2p(): Boolean = hasWifiP2pPermission()
+
+    init {
+        Log.d(TAG, "WifiP2pManagerSingleton initialized")
+        initP2P()
+    }
+
+    private fun initP2P() {
+        Log.d(TAG, "Initializing P2P...")
+        wifiP2pChannel?.close()
+        wifiP2pChannel = wifiP2pManager.initialize(context, Looper.getMainLooper(), object : WifiP2pManager.ChannelListener {
+            override fun onChannelDisconnected() {
+                Log.d(TAG, "wifiP2pChannel disconnect")
+            }
+        })
+        Log.d(TAG, "P2P initialized, channel: ${wifiP2pChannel != null}")
+    }
+
+    fun addCallback(callback: WifiP2pCallback) {
+        if (!callbacks.contains(callback)) {
+            callbacks.add(callback)
+        }
+    }
+
+    fun removeCallback(callback: WifiP2pCallback) {
+        callbacks.remove(callback)
+    }
+
+    fun registerReceiver() {
+        receiver = WifiP2pBroadcastReceiver(this)
+        // Use compat API to avoid calling the API 33+ registerReceiver overload on older devices.
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            intentFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    fun unregisterReceiver() {
+        try {
+            receiver?.let { context.unregisterReceiver(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering receiver", e)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startPeerDiscovery(allowDeviceResetOnTimeout: Boolean = true) {
+        allowDeviceResetOnDiscoveryTimeout = allowDeviceResetOnTimeout
+        if (!p2pOperationsEnabled) {
+            Log.d(TAG, "Ignoring peer discovery while P2P operations are stopped")
+            return
+        }
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot start P2P discovery: required permission is not granted")
+            callbacks.forEach { it.onPeerDiscoveryFailed(WifiP2pManager.ERROR) }
+            return
+        }
+        handler.postDelayed(discoveryTimeOut, discoveryTimeoutMs)
+        wifiP2pManager.discoverPeers(wifiP2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.d(TAG, "Peer discovery started successfully")
+                callbacks.forEach { it.onPeerDiscoveryStarted() }
+            }
+
+            override fun onFailure(reason: Int) {
+                Log.e(TAG, "Peer discovery failed: $reason")
+                com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents.warn(com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem.SYNC, "P2P discovery failed", mapOf("reason" to p2pReason(reason)))
+                if (!p2pOperationsEnabled) {
+                    Log.d(TAG, "Ignoring discovery failure after P2P operations stopped")
+                    return
+                }
+                // Mirror vendor behavior: reschedule the internal timeout and stop discovery
+                // so we can retry in a stable way.
+                handler.removeCallbacks(discoveryTimeOut)
+                handler.postDelayed(discoveryTimeOut, 2000L)
+                callbacks.forEach { it.onPeerDiscoveryFailed(reason) }
+                discoverPeersStable()
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    fun discoverPeersStable() {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot stop P2P discovery: required permission is not granted")
+            return
+        }
+        wifiP2pManager.stopPeerDiscovery(wifiP2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.d(TAG, "discoverPeersStable success")
+            }
+
+            override fun onFailure(reason: Int) {
+                Log.d(TAG, "discoverPeersStable onFailure $reason")
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connectToDevice(device: WifiP2pDevice) {
+        if (!p2pOperationsEnabled) {
+            Log.d(TAG, "Ignoring P2P connect while operations are stopped")
+            return
+        }
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot connect P2P: required permission is not granted")
+            callbacks.forEach { it.onConnectRequestFailed(WifiP2pManager.ERROR) }
+            return
+        }
+        // Once we decide to connect, stop peer discovery timeout tracking.
+        resetPeerDiscovery()
+
+        if (connectionState.isConnecting()) {
+            Log.d(TAG, "P2P is connecting, no connection call back")
+            callbacks.forEach { it.connecting() }
+            return
+        }
+
+        if (connectionState.isConnected()) {
+            Log.d(TAG, "P2P is already connected, return directly")
+            return
+        }
+
+        // Arm internal connect timeout (vendor app uses ~5s).
+        handler.postDelayed(connectTimeOut, connectTimeoutMs)
+
+        wifiP2pDevice = device
+        val config = WifiP2pConfig().apply {
+            deviceAddress = device.deviceAddress
+            // Match decompiled vendor app: WPS PBC.
+            wps.setup = 0
+        }
+
+        connectionState.setConnecting(true)
+        connectInFlightSinceMs = SystemClock.elapsedRealtime()
+        Log.d(TAG, "Already connecting device: ${device.deviceName}---${device.deviceAddress}")
+
+        wifiP2pManager.connect(wifiP2pChannel, config, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.d(TAG, "Connect request sent successfully")
+                callbacks.forEach { it.onConnectRequestSent() }
+            }
+
+            override fun onFailure(reason: Int) {
+                Log.e(TAG, "Connect request failed: $reason")
+                com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents.warn(com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem.SYNC, "P2P connect request failed", mapOf("reason" to p2pReason(reason)))
+                connectInFlightSinceMs = 0L
+                connectionState.markConnectRequestFailed()
+                callbacks.forEach { it.onConnectRequestFailed(reason) }
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    fun cancelP2pConnection() {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot cancel P2P connection: required permission is not granted")
+            return
+        }
+        try {
+            initP2P()
+            wifiP2pManager.cancelConnect(wifiP2pChannel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "Cancel connect successful")
+                    handler.removeCallbacks(connectTimeOut)
+                    callbacks.forEach { it.cancelConnect() }
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.e(TAG, "Cancel connect failed: $reason")
+                    handler.removeCallbacks(connectTimeOut)
+                    callbacks.forEach { it.cancelConnectFail(reason) }
+                }
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "Error canceling P2P connection", e)
+        }
+    }
+
+    fun resetDeviceP2p() {
+        Log.d(TAG, "resetDeviceP2p called - sending glassesControl[2,1,15]")
+        try {
+            LargeDataHandler.getInstance().glassesControl(
+                byteArrayOf(0x02, 0x01, 0x0F)
+            ) { cmdType, resp ->
+                Log.d(
+                    TAG,
+                    "resetDeviceP2p callback: cmdType=$cmdType, respType=${resp.dataType}, error=${resp.errorCode}"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send resetDeviceP2p command to glasses", e)
+        }
+    }
+
+    fun resetFailCount() {
+        p2pOperationsEnabled = true
+        connectInFlightSinceMs = 0L
+        retryState.reset()
+        connectionState.reset()
+        cancelPendingRetries()
+    }
+
+    /** Stop delayed discovery/connect work without discarding the current group state. */
+    fun cancelPendingRetries() {
+        handler.removeCallbacks(discoveryTimeOut)
+        handler.removeCallbacks(connectTimeOut)
+        handler.removeCallbacks(delayedPeerDiscoveryRestart)
+    }
+
+    /** Stop a completed flow from rearming discovery through late framework callbacks. */
+    fun stopP2pOperations() {
+        p2pOperationsEnabled = false
+        cancelPendingRetries()
+        discoverPeersStable()
+    }
+
+    fun isConnecting(): Boolean = connectionState.isConnecting()
+    fun isConnected(): Boolean = connectionState.isConnected()
+
+    /**
+     * True while our own connect() is still forming the group (bounded by
+     * [groupFormationWindowMs]). [isConnecting] cannot tell: the framework's "disconnected"
+     * broadcast at the start of a join clears it. Resets and discovery restarts wait for this.
+     */
+    fun isJoinInFlight(): Boolean = joinInFlightRemainingMs() > 0L
+
+    private fun joinInFlightRemainingMs(): Long = connectInFlightSinceMs.let {
+        if (it == 0L) 0L else it + groupFormationWindowMs - SystemClock.elapsedRealtime()
+    }
+
+    fun resetPeerDiscovery() {
+        handler.removeCallbacks(discoveryTimeOut)
+    }
+
+    fun restartPeerDiscovery() {
+        if (!p2pOperationsEnabled) {
+            Log.d(TAG, "Ignoring peer-discovery restart while operations are stopped")
+            return
+        }
+        if (isJoinInFlight()) {
+            // Re-initializing the channel here would abort our own join (add.223).
+            Log.d(TAG, "restartPeerDiscovery skipped: P2P join in flight")
+            return
+        }
+        Log.d(TAG, "restartPeerDiscovery: stopping current discovery and reinitializing")
+        cancelPendingRetries()
+        initP2P()
+        // Stabilization delay: give the P2P stack time to settle after reset
+        // before starting discovery. Prevents "Connect request failed: 2" when
+        // the glasses peer appears immediately after restart.
+        handler.postDelayed(delayedPeerDiscoveryRestart, 1500L)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun requestPeers() {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot request P2P peers: required permission is not granted")
+            return
+        }
+        wifiP2pChannel?.let { channel ->
+            wifiP2pManager.requestPeers(channel, object : WifiP2pManager.PeerListListener {
+                override fun onPeersAvailable(peers: WifiP2pDeviceList) {
+                    val deviceList = peers.deviceList
+                    Log.d(TAG, "Peers available: ${deviceList.size} devices")
+                    callbacks.forEach { it.onPeersChanged(deviceList) }
+                }
+            })
+        }
+    }
+
+    /** [onInfo] additionally receives this request's answer after the registered callbacks. */
+    @SuppressLint("MissingPermission")
+    fun requestConnectionInfo(onInfo: ((WifiP2pInfo) -> Unit)? = null) {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot request P2P connection info: required permission is not granted")
+            return
+        }
+        wifiP2pChannel?.let { channel ->
+            wifiP2pManager.requestConnectionInfo(channel, object : WifiP2pManager.ConnectionInfoListener {
+                override fun onConnectionInfoAvailable(info: WifiP2pInfo) {
+                    Log.d(TAG, "Connection info available: groupFormed=${info.groupFormed}, isGroupOwner=${info.isGroupOwner}")
+                    // Forward to the outer singleton; avoid recursive
+                    // calls to this anonymous listener implementation.
+                    this@WifiP2pManagerSingleton.onConnectionInfoAvailable(info)
+                    onInfo?.invoke(info)
+                }
+            })
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun createGroup(onResult: (Boolean) -> Unit) {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot create P2P group: required permission is not granted")
+            onResult(false)
+            return
+        }
+        wifiP2pChannel?.let { channel ->
+            wifiP2pManager.createGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "P2P group created successfully")
+                    onResult(true)
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.e(TAG, "Failed to create P2P group: $reason")
+                    onResult(false)
+                }
+            })
+        } ?: run {
+            Log.e(TAG, "P2P channel not initialized")
+            onResult(false)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun removeGroup(onResult: (Boolean) -> Unit) {
+        if (!hasWifiP2pPermission()) {
+            Log.w(TAG, "Cannot remove P2P group: required permission is not granted")
+            onResult(false)
+            return
+        }
+        wifiP2pChannel?.let { channel ->
+            wifiP2pManager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "P2P group removed successfully")
+                    onResult(true)
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.e(TAG, "Failed to remove P2P group: $reason")
+                    onResult(false)
+                }
+            })
+        } ?: run {
+            Log.e(TAG, "P2p channel not initialized")
+            onResult(false)
+        }
+    }
+
+    // Internal methods for handling P2P events
+    internal fun onWifiP2pEnabled() {
+        callbacks.forEach { it.onWifiP2pEnabled() }
+    }
+
+    internal fun onWifiP2pDisabled() {
+        callbacks.forEach { it.onWifiP2pDisabled() }
+    }
+
+    internal fun onPeersChanged(peers: Collection<WifiP2pDevice>) {
+        callbacks.forEach { it.onPeersChanged(peers) }
+    }
+
+    internal fun onThisDeviceChanged(device: WifiP2pDevice) {
+        callbacks.forEach { it.onThisDeviceChanged(device) }
+    }
+
+    internal fun onConnectionInfoAvailable(info: WifiP2pInfo) {
+        com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents.info(
+            com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem.SYNC, "P2P connection info",
+            mapOf("group_formed" to info.groupFormed.toString(), "phone_is_owner" to info.isGroupOwner.toString(),
+                "owner_ip" to (info.groupOwnerAddress?.hostAddress ?: "none")),
+        )
+        connectionState.markConnectionInfoAvailable(info.groupFormed)
+        handler.removeCallbacks(connectTimeOut)
+        if (info.groupFormed) {
+            connectInFlightSinceMs = 0L
+            handler.removeCallbacks(discoveryTimeOut)
+        }
+        lastGroupOwnerIp = info.groupOwnerAddress?.hostAddress
+        callbacks.forEach { it.onConnected(info) }
+    }
+
+    internal fun onDisconnected() {
+        com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents.info(com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem.SYNC, "P2P disconnected")
+        connectionState.markDisconnected()
+        handler.removeCallbacks(connectTimeOut)
+        lastGroupOwnerIp = null
+        callbacks.forEach { it.onDisconnected() }
+    }
+
+    // Timeout handlers
+    private val discoveryTimeOut = object : Runnable {
+        override fun run() {
+            if (!p2pOperationsEnabled) return
+            // A join in flight makes discoverPeers answer BUSY; resetting here would tear down
+            // our own join (glasses 02 01 0F + channel re-init). Wait for it to finish instead.
+            val joinLeftMs = joinInFlightRemainingMs()
+            if (joinLeftMs > 0L) {
+                Log.d(TAG, "Discovery timeout deferred ${joinLeftMs}ms: P2P join in flight")
+                handler.postDelayed(this, joinLeftMs)
+                return
+            }
+            Log.d(TAG, "Internal scan retry connection: ${retryState.discoveryRetryCount()}")
+            if (!allowDeviceResetOnDiscoveryTimeout) {
+                Log.d(TAG, "Discovery timeout reached with device reset disabled")
+                return
+            }
+            if (retryState.shouldRetryDiscovery()) {
+                Log.d(TAG, "Internal scan retry connection once")
+                resetDeviceP2p()
+                initP2P()
+                startPeerDiscovery(allowDeviceResetOnTimeout = true)
+            }
+        }
+    }
+
+    private val connectTimeOut = object : Runnable {
+        override fun run() {
+            connectionState.setConnecting(false)
+            if (!p2pOperationsEnabled) return
+            if (retryState.shouldRetryConnect()) {
+                wifiP2pDevice?.let { device ->
+                    Log.d(TAG, "Internal connection retry connection once")
+                    connectToDevice(device)
+                }
+            } else {
+                Log.d(TAG, "Do not reconnect, wait for external timeout")
+                com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticEvents.warn(com.fersaiyan.cyanbridge.shared.diagnostics.DiagnosticSubsystem.SYNC, "P2P connect retry also failed")
+                callbacks.forEach { it.retryAlsoFailed() }
+            }
+        }
+    }
+
+    interface WifiP2pCallback : com.heycyan.core.connectivity.p2p.WifiP2pCallback
+
+    /** WifiP2pManager failure codes by name (ERROR=0, P2P_UNSUPPORTED=1, BUSY=2, NO_SERVICE_REQUESTS=3). */
+    private fun p2pReason(reason: Int): String = when (reason) {
+        0 -> "ERROR"
+        1 -> "P2P_UNSUPPORTED"
+        2 -> "BUSY"
+        3 -> "NO_SERVICE_REQUESTS"
+        else -> reason.toString()
+    }
+}

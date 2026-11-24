@@ -1,0 +1,76 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">Системный язык</string>
+    <string name="language_selection_title">Выберите язык приложения</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_save">Сохранить</string>
+    <string name="walking_aid_title">Помощник при ходьбе</string>
+    <string name="walking_aid_settings">Настройки помощника при ходьбе</string>
+    <string name="walking_aid_general">Основные</string>
+    <string name="walking_aid_capture_interval">Интервал захвата</string>
+    <string name="walking_aid_image_recognition">Распознавание изображений</string>
+    <string name="walking_aid_depth_estimation">Оценка глубины</string>
+    <string name="walking_aid_output">Вывод</string>
+    <string name="walking_aid_tts_enabled">Озвучивать описания</string>
+    <string name="walking_aid_safety_disclaimer">Предупреждение безопасности при первом предупреждении</string>
+    <string name="walking_aid_history">История изображений</string>
+    <string name="walking_aid_clear_history">Очистить историю</string>
+    <string name="walking_aid_source_local">Локально (на устройстве)</string>
+    <string name="walking_aid_source_cloud">Облако (Pro)</string>
+    <string name="walking_aid_not_connected">Walking Aid: Очки не подключены. Сначала подключите очки.</string>
+    <string name="walking_aid_meeting_active">Walking Aid: Идет запись встречи. Остановите запись перед включением Walking Aid.</string>
+    <string name="onboarding_glasses_connection_title">Подключите очки</string>
+    <string name="onboarding_glasses_connection_desc">Разрешите CyanBridge найти и подключить очки поблизости.</string>
+    <string name="onboarding_glasses_connection_details">Разрешение Bluetooth используется только для поиска, сопряжения и связи с очками. Можно продолжить без него и предоставить разрешение позже при подключении устройства.</string>
+    <string name="onboarding_optional_features_title">Дополнительные функции — выбор за вами</string>
+    <string name="onboarding_optional_features_desc">AutoDiary, Auto Audio, Local Agent и функции Pro являются необязательными и настраиваются в разделе «Плагины».</string>
+    <string name="onboarding_optional_features_details">Сначала подключите очки, а затем изучите плагины, когда будете готовы. Каждый плагин объясняет назначение и запрашивает только необходимые разрешения при включении. Функции можно просматривать и отключать в любое время.</string>
+    <string name="onboarding_open_source_title">Открытая разработка</string>
+    <string name="onboarding_open_source_desc">Изучайте код, сообщайте о проблемах и помогайте улучшать CyanBridge.</string>
+    <string name="onboarding_open_source_details">CyanBridge — проект с открытым исходным кодом. Изучайте код, сообщайте об ошибках или проблемах безопасности, предлагайте улучшения или участвуйте через GitHub.</string>
+    <string name="onboarding_skip_all">Пропустить всё</string>
+    <string name="onboarding_back">Назад</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_get_started">Начать</string>
+    <string name="meta_diagnostics_title">Диагностика Meta Ray-Ban</string>
+    <string name="meta_diagnostics_description">CyanBridge соберёт последнее состояние Meta DAT, ошибки, сведения об устройстве и отфильтрованные записи logcat для расследования проблемы.</string>
+    <string name="nav_transcriptions_recordings">Медиа</string>
+    <string name="text_10">Сопряжение по BT</string>
+    <string name="text_11">Зарегистрировать обработчик отчётов</string>
+    <string name="text_16">Вывести информацию об OTA-сервере</string>
+    <string name="text_17">Проверить OTA в режиме pull (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">Не закрывать CyanBridge</string>
+    <string name="battery_opt_not_supported">Настройки оптимизации батареи недоступны в этой версии Android.</string>
+    <string name="battery_opt_cant_open_settings">Не удалось открыть настройки на этом устройстве.</string>
+
+
+
+    <string name="onboarding_local_model_title">Выберите локальный ИИ</string>
+    <string name="onboarding_local_model_desc">Выберите стартовую модель. CyanBridge загрузит её в фоновом режиме, пока вы завершаете настройку.</string>
+    <string name="onboarding_local_model_details">Настройки генерации автоматически подбираются для модели, при этом предпочтение отдаётся ускорению GPU. Позже вы сможете изменить или импортировать модели в разделе «Локальные модели».</string>
+    <string name="onboarding_accessibility_disclosure_title">Информация о доступе к специальным возможностям</string>
+    <string name="onboarding_accessibility_disclosure_body">У CyanBridge нет собственной службы специальных возможностей. Память экрана и локальный агент работают через Tasker и AutoInput: служба специальных возможностей AutoInput читает текст и структуру интерфейса приложения на экране и позволяет локальному агенту нажимать, вводить текст, прокручивать и перемещаться по экрану от вашего имени. Специальные возможности AutoInput включаете вы сами; CyanBridge никогда не включает их. Содержимое экрана хранится локально для функции памяти экрана. Когда вы просите локального агента что-то сделать, текущее содержимое экрана может обрабатываться выбранным вами поставщиком ИИ, включая облачного поставщика, если вы его выбрали. Снимки экрана необязательны и по умолчанию выключены. Они включаются в профиле Tasker CyanBridge Local Agent; после этого каждый снимок для планирования отправляется выбранному планировщику, в том числе облачному или Pro. Приложения, заблокированные в Tasker, пропускаются. Вы можете в любой момент отключить специальные возможности AutoInput, память экрана или локального агента.</string>
+    <string name="meta_pairing_title">Сопрячь очки Meta</string>
+
+
+    <string name="chat_deleted">Чат удалён</string>
+    <string name="synced_media_folder_hint">Показаны файлы из: %1$s</string>
+    <string name="synced_media_open_failed">Не удалось открыть этот медиафайл.</string>
+
+    <string name="donation_intro_dialog_title">Информация о поддержке CyanBridge через Asaas</string>
+    <string name="donation_intro_dialog_message">Здравствуйте, спасибо, что рассматриваете возможность поддержать CyanBridge пожертвованием! Я работаю над этим проектом параллельно с учёбой в докторантуре, и ваша поддержка очень важна для меня. Мне пока не удалось настроить Stripe из-за особых требований к бразильским компаниям, поэтому сейчас я использую платёжный сервис Asaas. Страница оплаты на португальском языке; при необходимости воспользуйтесь Google Переводчиком. Я активно ищу более удобную альтернативу. Ещё раз спасибо за поддержку!</string>
+    <string name="donation_intro_open_button">Открыть форму оплаты Asaas</string>
+    <string name="meta_registration_channel_name">Подключение очков Meta</string>
+    <string name="meta_registration_lost_title">Очки Meta отключены</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge больше не подключён в Meta AI. Вероятно, режим разработчика был выключен. Включите его снова в Meta AI, затем зарегистрируйте CyanBridge снова.</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge больше не подключён в Meta AI. Оставьте режим разработчика выключенным и зарегистрируйте CyanBridge снова.</string>
+    <string name="meta_registration_register_again">Зарегистрировать снова</string>
+    <string name="voice_profile_status_none">Не записан. Три короткие фразы помогут CyanBridge запомнить ваш голос. Ответы пока не фильтруются.</string>
+    <string name="voice_profile_status_enrolled">Записан %1$s. Ответы пока не фильтруются.</string>
+    <string name="voice_profile_status_model_ready">Голосовая модель: %1$s (установлена)</string>
+    <string name="voice_profile_status_model_missing">Голосовая модель: %1$s (ещё не установлена; ваши фразы сохраняются до установки)</string>
+    <string name="voice_profile_delete_title">Удалить голосовой профиль?</string>
+    <string name="voice_profile_delete_body">С этого телефона будут удалены записанные фразы и шаблоны вашего голоса.</string>
+    <string name="voice_profile_delete_confirm">Удалить</string>
+</resources>

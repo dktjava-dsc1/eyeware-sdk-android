@@ -1,0 +1,184 @@
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Gradle
+.gradle/
+build/
+*/build/
+local.properties
+
+# Android
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.dex
+*.class
+
+# Binaries and SDKs
+# Keep the SDK needed for the build
+# !glasses_sdk_*.aar 
+
+# Large firmware and metadata files
+*.swu
+*.json
+!android/CyanBridge/training/phone_ui_synthetic_v1/manifest.json
+!android/CyanBridge/training/artemis_real_v1/*.json
+!android/CyanBridge/training/tasker_real_v1/*.json
+!android/CyanBridge/training/laya_needle_dataset_sources_v1/catalog.json
+!android/CyanBridge/training/laya_needle_specialists_v1/*-summary.json
+!package.json
+firmware_dump/
+
+# iOS
+*.xcworkspace
+*.xcodeproj
+# Keep the shared KMP host scheme available to Xcode and hosted CI.
+!ios/QCSDKDemo.xcodeproj/
+!ios/QCSDKDemo.xcodeproj/xcshareddata/
+!ios/QCSDKDemo.xcodeproj/xcshareddata/xcschemes/
+!ios/QCSDKDemo.xcodeproj/xcshareddata/xcschemes/CyanBridgeKMPHost.xcscheme
+DerivedData/
+Pods/
+QCSDK.framework/
+
+# Device data dumps
+com.glasssutdio.wear/
+
+# Reference docs and decompiled apps (Keeping repo clean)
+HeyCyanOfficialApp/
+eyevue-jadx/
+android/eyevue-jadx/
+android/TuneBudsOfficialApp/
+Android_SDK_Development_Guide_CN.pdf
+
+# Node.js
+node_modules/
+
+# Keep sibling website repos out of the SDK worktree if copied here by mistake
+Cyanbridge_website/
+Carelens_website/
+
+# Local side projects and analysis notes
+android/EvenRealitiesApp/
+android/XGIMIGlassesApp/
+presentation/
+BINARY_ANALYSIS*.md
+android/P2P_SYNC_ANALYSIS*.md
+
+# Moonshine is being phased out and must remain local only.
+third_party/moonshine/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling (very large / machine-specific)
+tools/
+# Keep the small opt-in real-model probe and calibration tooling under version
+# control. Other local tooling remains ignored.
+!tools/
+tools/*
+!tools/hil/
+tools/hil/*
+!tools/hil/build_debug_fast.sh
+!tools/hil/fast-build.init.gradle
+!tools/hil/run_real_embedding_models.sh
+!tools/hil/run_tasker_youtube_hil.sh
+!tools/hil/run_local_agent_calibration.sh
+!tools/hil/run_hil_class.sh
+!tools/hil/run_artemis_fixture.py
+!tools/hil/test_artemis_fixture.py
+!tools/hil/build_embedding_runtime_aar.sh
+!tools/hil/embedding-runtime/
+tools/hil/embedding-runtime/*
+!tools/hil/embedding-runtime/MANIFEST
+!tools/hil/embedding-runtime/nembd-per-call.patch
+!tools/hil/embedding-runtime/jni-list-contract.patch
+!tools/hil/embedding-runtime/jniLibs-prebuilt.patch
+!tools/benchmarks/
+tools/benchmarks/*
+!tools/benchmarks/generate_local_agent_calibration.py
+!tools/benchmarks/benchmark_needle_mobile_actions.py
+!tools/benchmarks/benchmark_laya_mobile_actions.py
+!tools/benchmarks/test_benchmark_laya_mobile_actions.py
+!tools/benchmarks/analyze_local_agent_calibration.py
+!tools/benchmarks/compare_laya_needle_live_shadow.py
+!tools/benchmarks/phone_accessibility_frame.py
+!tools/benchmarks/test_phone_accessibility_frame.py
+!tools/benchmarks/make_phone_ui_training.py
+!tools/benchmarks/test_make_phone_ui_training.py
+!tools/benchmarks/train_laya_phone_ui.py
+!tools/benchmarks/make_glasses_question_fixtures.py
+!tools/benchmarks/eval_glasses_question_routing.py
+!tools/benchmarks/eval_spoken_route_tags.py
+!tools/benchmarks/grade_question_prompts.py
+!tools/benchmarks/eval_phone_ui_needle.py
+!tools/benchmarks/eval_phone_ui_real_laya.py
+!tools/benchmarks/eval_phone_ui_real_needle.py
+!tools/benchmarks/collect_artemis_settings.py
+!tools/benchmarks/test_collect_artemis_settings.py
+!tools/benchmarks/audit_artemis_phone_episodes.py
+!tools/benchmarks/test_audit_artemis_phone_episodes.py
+!tools/benchmarks/collect_artemis_clock.py
+!tools/benchmarks/test_collect_artemis_clock.py
+!tools/benchmarks/collect_artemis_youtube_query.py
+!tools/benchmarks/test_collect_artemis_youtube_query.py
+!tools/benchmarks/assemble_artemis_phone_pool.py
+!tools/benchmarks/test_assemble_artemis_phone_pool.py
+!tools/benchmarks/audit_tasker_settings_episode.py
+!tools/benchmarks/test_audit_tasker_settings_episode.py
+!tools/benchmarks/export_tasker_settings_episode.py
+!tools/benchmarks/make_specialist_training.py
+!tools/benchmarks/specialist_metrics.py
+!tools/benchmarks/train_laya_specialist.py
+!tools/benchmarks/eval_laya_specialist.py
+!tools/benchmarks/eval_needle_specialist.py
+!tools/benchmarks/run_specialist_campaign.py
+!tools/benchmarks/audit_specialist_training.py
+!tools/benchmarks/baseline_specialist.py
+!tools/benchmarks/test_specialist_training.py
+!tools/benchmarks/make_specialist_stress.py
+!tools/benchmarks/summarize_specialist_campaign.py
+!tools/benchmarks/build_needle_offline.py
+!tools/benchmarks/rescore_needle_specialist.py
+!tools/benchmarks/probe_needle_specialist_contract.py
+!tools/benchmarks/probe_needle_teacher_forcing.py
+!tools/benchmarks/add_specialist_reasoning.py
+!tools/benchmarks/bounded_specialist_contract.py
+!tools/benchmarks/make_bounded_specialist_training.py
+!tools/benchmarks/make_bounded_specialist_flat.py
+!tools/benchmarks/test_bounded_specialist_contract.py
+!tools/benchmarks/eval_bounded_specialist.py
+!tools/benchmarks/audit_bounded_specialist.py
+!tools/benchmarks/run_bounded_campaign.py
+!tools/benchmarks/run_bounded_order_ablation.py
+!tools/benchmarks/summarize_bounded_campaign.py
+!tools/benchmarks/test_summarize_bounded_campaign.py
+!tools/benchmarks/train_needle_bounded.py
+!tools/benchmarks/compare_laya_precision.py
+!tools/benchmarks/export_laya_fixed_onnx.py
+!tools/benchmarks/bounded_embedding.py
+!tools/benchmarks/train_embedding_bounded.py
+!tools/benchmarks/test_bounded_embedding.py
+!tools/benchmarks/score_litert_bounded_eval.py
+!tools/benchmarks/test_score_litert_bounded_eval.py
+!tools/benchmarks/hf_bounded_decision.py
+!tools/benchmarks/gemma_decision_prompts.py
+!tools/benchmarks/train_gemma_decision_lora.py
+!tools/benchmarks/merge_gemma_decision_lora.py
+!tools/benchmarks/audio_speaker_*.py
+
+# Generated analysis and language caches
+**/.kotlin/
+**/__pycache__/
+graphify-out/
+**/graphify-out/
+
+# Local recovery/export snapshots
+backups/
+android/CyanBridge/_local_termux_server_phone_current/

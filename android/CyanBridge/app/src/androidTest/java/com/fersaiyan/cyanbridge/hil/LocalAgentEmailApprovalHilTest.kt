@@ -1,0 +1,571 @@
+package com.fersaiyan.cyanbridge.hil
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.ContextCompat
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.fersaiyan.cyanbridge.agent.LocalAgentPrefs as AutomationPrefs
+import com.fersaiyan.cyanbridge.data.local.entity.PendingAction
+import com.fersaiyan.cyanbridge.localagent.LocalAgentAction
+import com.fersaiyan.cyanbridge.localagent.LocalAgentActionParser
+import com.fersaiyan.cyanbridge.localagent.LocalAgentController
+import com.fersaiyan.cyanbridge.localagent.LocalAgentIntents
+import com.fersaiyan.cyanbridge.localagent.LocalAgentObservation
+import com.fersaiyan.cyanbridge.agent.LocalAgentPrefs as RuntimePrefs
+import com.fersaiyan.cyanbridge.localagent.TaskerExecutionBackend
+import com.fersaiyan.cyanbridge.localagent.TaskerLocalAgentService
+import com.fersaiyan.cyanbridge.localmodels.remote.RemoteOpenAiPrefs
+import com.fersaiyan.cyanbridge.localmodels.storage.LocalModelStorageRepository
+import com.fersaiyan.cyanbridge.shared.settings.AgentProviderType
+import com.fersaiyan.cyanbridge.ui.MyApplication
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.Closeable
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+
+/**
+ * Destructive/side-effect HIL: sends one real email to the repository owner's own test address.
+ *
+ * This test deliberately validates behavior rather than model prose. The planner may phrase the
+ * summary and the spoken confirmation naturally. What must remain strict is the consent boundary:
+ * a meaningful email is prepared, CyanBridge reads enough of it back to identify the pending send,
+ * ambiguity leaves it pending, and Tasker cannot send until an explicit voice approval arrives.
+ */
+@RunWith(AndroidJUnit4::class)
+class LocalAgentEmailApprovalHilTest {
+    @Test
+    fun cyanBridgePreparesReasonableEmailReadsItBackAndWaitsForVoiceApprovalBeforeSending() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        HilTestSupport.requireTaskerStack(context)
+        HilTestSupport.requireOrSkip(
+            HilTestSupport.emailSendRequired,
+            "Real-email HIL was not enabled for this instrumentation run",
+        )
+
+        val dao = MyApplication.database.pendingActionDao()
+        // A failed HIL may leave its own unapproved draft behind. Retire only
+        // those uniquely tagged self-test drafts; never touch user pending actions
+        // or any approved/executed action (which may already have sent).
+        runBlocking {
+            dao.getActionsByStatus("pending")
+                .filter { it.source == "tasker_agent" &&
+                    it.actionJson.contains("CyanBridge HIL smartglasses summary CB-HIL-") &&
+                    it.actionJson.contains(RECIPIENT, ignoreCase = true) }
+                .forEach { draft ->
+                    draft.status = "rejected"
+                    draft.result = "abandoned_hil_draft_before_approval"
+                    dao.update(draft)
+                }
+        }
+        val preexistingPending = runBlocking { dao.getActionsByStatus("pending") }
+        assertTrue(
+            "Dedicated HIL target has pre-existing pending actions; resolve them before running a real-send test: $preexistingPending",
+            preexistingPending.isEmpty(),
+        )
+
+        val previousProvider = AutomationPrefs.getProviderType(context)
+        val previousAutomationEnabled = AutomationPrefs.isLocalAgentAutomationEnabled(context)
+        val previousMaxSteps = AutomationPrefs.getMaxSteps(context)
+        val previousRequireConfirmation = RuntimePrefs.isRequireActionConfirmationEnabled(context)
+        val previousEmbeddingEnabled = AutomationPrefs.isEmbeddingDecisionEnabled(context)
+
+        val providerForTest = if (HilTestSupport.proPlannerRequired ||
+            previousProvider == AgentProviderType.PRO_SUBSCRIPTION) {
+            AgentProviderType.PRO_SUBSCRIPTION
+        } else {
+            AgentProviderType.LOCAL_AGENT
+        }
+        if (providerForTest == AgentProviderType.PRO_SUBSCRIPTION) {
+            HilTestSupport.requireVerifiedProPlanner(context)
+        }
+        if (providerForTest == AgentProviderType.LOCAL_AGENT) {
+            HilTestSupport.requireOrSkip(
+                !RemoteOpenAiPrefs.isActive(context),
+                "Local email HIL requires the on-device model path when Pro Subscription is not selected",
+            )
+            HilTestSupport.requireOrSkip(
+                LocalModelStorageRepository.resolveSelectedModel(context) != null,
+                "No CyanBridge local model is installed/selected for the email automation HIL",
+            )
+        }
+
+        val runTag = "CB-HIL-${System.currentTimeMillis()}"
+        val subject = "CyanBridge HIL smartglasses summary $runTag"
+        val goal = buildGoal(subject)
+        val reached = linkedSetOf<String>()
+        fun stage(name: String) {
+            if (reached.add(name)) {
+                val event = "JEV_HIL_STAGE email=$name reached=$reached"
+                println(event)
+                android.util.Log.i("JevHilStage", event)
+            }
+        }
+
+        HilNewsFixtureServer().use { newsFixture ->
+        ActivityScenario.launch(HilFixtureActivity::class.java).use {
+            try {
+                setBlockedPackages(context, "")
+                Thread.sleep(400)
+
+                AutomationPrefs.setProviderType(context, providerForTest)
+                AutomationPrefs.setLocalAgentAutomationEnabled(context, true)
+                AutomationPrefs.setMaxSteps(context, 30)
+                // Email delegation is planner+approval mechanics; keep the
+                // embedding gate out so this test isolates that path.
+                AutomationPrefs.setEmbeddingDecisionEnabled(context, false)
+                RuntimePrefs.setRequireActionConfirmationEnabled(context, true)
+                RuntimePrefs.clearLastApprovalVoicePrompt(context)
+                RuntimePrefs.clearLastApprovalVoiceReply(context)
+                RuntimePrefs.setStatus(context, "HIL email task starting")
+                RuntimePrefs.clearLastError(context)
+
+                // The goal's first half assumes Chrome is already on the HIL
+                // search page. Serve it deterministically (loopback only) and
+                // navigate there before the agent starts; a stale Chrome tab
+                // otherwise strands the run on an error page. Chrome's renderer
+                // intermittently SIGILLs on first launch after boot on this
+                // 16k emulator target, so warm it before the real navigation.
+                warmChrome(context, newsFixture.searchUrl)
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(newsFixture.searchUrl))
+                        .setPackage(CHROME_PACKAGE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                val fixtureObservation = awaitFixtureSearchPage(context)
+                assertTrue(
+                    "Tasker did not observe the deterministic news fixture: ${fixtureObservation?.screenText}",
+                    fixtureObservation?.screenText?.contains(SEARCH_MARKER) == true,
+                )
+                stage("fixture_observed")
+
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, TaskerLocalAgentService::class.java).apply {
+                        action = LocalAgentIntents.ACTION_START
+                        putExtra(LocalAgentIntents.EXTRA_GOAL, goal)
+                    },
+                )
+
+                val pending = awaitEmailApproval(context, subject)
+                stage("send_approval_requested")
+                val preparedEmail = extractPreparedEmail(pending)
+                assertEquals("Planner prepared the email for the wrong recipient", RECIPIENT, preparedEmail.to.trim())
+                assertEquals("Planner changed the unique HIL subject", subject, preparedEmail.subject.trim())
+                assertReasonableGroundedBody(preparedEmail.body)
+                stage("grounded_draft_verified")
+
+                val initialVoicePrompt = awaitVoicePrompt(context, preparedEmail)
+                assertReasonableReadback(initialVoicePrompt, preparedEmail)
+                stage("spoken_readback_verified")
+
+                val beforeApproval = runBlocking { TaskerExecutionBackend.observe(context) }
+                assertNotNull("Tasker observation unavailable while waiting for voice approval", beforeApproval)
+                assertFalse(
+                    "Gmail opened before the user approved the high-risk SendEmail action",
+                    beforeApproval?.packageName == HilTestSupport.GMAIL_PACKAGE,
+                )
+
+                val ambiguousCommand = LocalAgentController.replyToApproval(context, "maybe")
+                assertTrue("CyanBridge could not route the ambiguous voice reply", ambiguousCommand.ok)
+                val clarificationPrompt = awaitClarificationPrompt(context, initialVoicePrompt)
+                assertTrue(
+                    "Ambiguous reply was not preserved as the last heard voice answer",
+                    RuntimePrefs.getLastApprovalVoiceReply(context).equals("maybe", ignoreCase = true),
+                )
+                assertTrue(
+                    "Ambiguous voice reply unexpectedly consumed the pending email",
+                    runBlocking { dao.getActionsByStatus("pending") }.any { it.id == pending.id },
+                )
+                assertTrue(
+                    "Clarification was too short to identify a real follow-up question: $clarificationPrompt",
+                    clarificationPrompt.trim().length >= 20,
+                )
+                assertTrue(
+                    "Clarification no longer refers to the pending action: $clarificationPrompt",
+                    clarificationPrompt.contains(RECIPIENT, ignoreCase = true) ||
+                        clarificationPrompt.contains("email", ignoreCase = true) ||
+                        clarificationPrompt.contains("send", ignoreCase = true),
+                )
+                stage("ambiguity_kept_pending")
+                println("CYANBRIDGE_EMAIL_HIL clarification_prompt=$clarificationPrompt")
+
+                // The only authorization signal in this HIL is this explicit affirmative reply.
+                val approvalCommand = LocalAgentController.replyToApproval(context, "yes")
+                assertTrue("CyanBridge could not route the explicit voice approval", approvalCommand.ok)
+                val executedApproval = awaitApprovalExecution(pending.id)
+                assertEquals("executed", executedApproval.status)
+                assertTrue(
+                    "Approved SendEmail did not execute through Tasker: ${executedApproval.result}",
+                    executedApproval.result?.contains("SendEmail") == true &&
+                        !executedApproval.result.orEmpty().contains("failed", ignoreCase = true),
+                )
+                stage("approved_action_executed")
+
+                val sentObservation = awaitSelfDeliveredMessage(context, subject)
+                val sentText = sentObservation.screenText.orEmpty().lowercase()
+                assertEquals(HilTestSupport.GMAIL_PACKAGE, sentObservation.packageName)
+                assertTrue(
+                    "Self-delivered Gmail message subject was not visible: ${sentObservation.screenText}",
+                    sentText.contains(runTag.lowercase()),
+                )
+                assertFalse(
+                    "The test still appears to be in the Gmail compose screen rather than after send: ${sentObservation.screenText}",
+                    looksLikeComposer(sentObservation.screenText.orEmpty()),
+                )
+                stage("self_delivery_observed")
+
+                val finalStatus = awaitTerminalStatus(context)
+                val finalError = RuntimePrefs.getLastError(context)
+                assertTrue("Local Agent did not report completion after the email send: $finalStatus", finalStatus.isNotBlank())
+                assertTrue("Local Agent finished with an error: $finalError", finalError == "(none)")
+                stage("agent_finished")
+            } catch (failure: Throwable) {
+                throw AssertionError(
+                    "Email HIL reached=$reached status=${RuntimePrefs.getStatus(context)} " +
+                        "error=${RuntimePrefs.getLastError(context)}: ${failure.message}",
+                    failure,
+                )
+            } finally {
+                runBlocking {
+                    dao.getActionsByStatus("pending")
+                        .filter { it.source == "tasker_agent" && it.actionJson.contains(subject) &&
+                            it.actionJson.contains(RECIPIENT, ignoreCase = true) }
+                        .forEach { draft ->
+                            draft.status = "rejected"
+                            draft.result = "hil_ended_before_approval"
+                            dao.update(draft)
+                        }
+                }
+                context.startService(
+                    Intent(context, TaskerLocalAgentService::class.java).apply {
+                        action = LocalAgentIntents.ACTION_STOP
+                    },
+                )
+                setBlockedPackages(context, "")
+                AutomationPrefs.setProviderType(context, previousProvider)
+                AutomationPrefs.setLocalAgentAutomationEnabled(context, previousAutomationEnabled)
+                AutomationPrefs.setMaxSteps(context, previousMaxSteps)
+                AutomationPrefs.setEmbeddingDecisionEnabled(context, previousEmbeddingEnabled)
+                RuntimePrefs.setRequireActionConfirmationEnabled(context, previousRequireConfirmation)
+            }
+        }
+        }
+    }
+
+    private fun warmChrome(context: Context, url: String) {
+        // Chrome's renderer intermittently SIGILLs on first launch after boot
+        // on the 16k emulator target. Absorb that here, not in the fixture wait.
+        repeat(2) {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        .setPackage(CHROME_PACKAGE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            Thread.sleep(4_000L)
+        }
+    }
+
+    private fun awaitFixtureSearchPage(context: Context): LocalAgentObservation? {
+        val deadline = System.currentTimeMillis() + FIXTURE_TIMEOUT_MS
+        var observation: LocalAgentObservation? = null
+        while (System.currentTimeMillis() < deadline) {
+            observation = runBlocking { TaskerExecutionBackend.observe(context) }
+            if (
+                observation?.packageName == CHROME_PACKAGE &&
+                observation.screenText?.contains(SEARCH_MARKER) == true
+            ) {
+                return observation
+            }
+            Thread.sleep(500L)
+        }
+        return observation
+    }
+
+    private fun extractPreparedEmail(pending: PendingAction): LocalAgentAction.SendEmail {
+        return LocalAgentActionParser.parseList(pending.actionJson)
+            .filterIsInstance<LocalAgentAction.SendEmail>()
+            .singleOrNull()
+            ?: throw AssertionError("Pending high-risk action was not exactly one SendEmail: ${pending.actionJson}")
+    }
+
+    private fun assertReasonableGroundedBody(body: String) {
+        val normalized = body.lowercase().replace(Regex("\\s+"), " ").trim()
+        assertTrue("Prepared email body is too short to be a useful summary: $body", normalized.length >= 80)
+        assertTrue(
+            "Prepared email does not look like a real multi-word summary: $body",
+            normalized.split(' ').count { it.length >= 3 } >= 12,
+        )
+
+        // The fixture contains several independent facts. Require evidence that the model actually
+        // read it, but allow natural paraphrases and do not force a magic phrase into the email.
+        val groundingSignals = listOf(
+            normalized.contains("42"),
+            Regex("\\b(?:8|eight)[ -]?hours?\\b").containsMatchIn(normalized),
+            normalized.contains("cobalt") || normalized.contains("horizon 88417") || normalized.contains("88417"),
+        )
+        assertTrue(
+            "Prepared email does not contain enough independently observed fixture facts: $body",
+            groundingSignals.count { it } >= 2,
+        )
+    }
+
+    private fun assertReasonableReadback(prompt: String, email: LocalAgentAction.SendEmail) {
+        val normalized = prompt.lowercase().replace(Regex("\\s+"), " ").trim()
+        assertTrue("Voice confirmation is too short to be a meaningful readback: $prompt", normalized.length >= 40)
+        assertTrue("Voice confirmation omitted the destination: $prompt", normalized.contains(email.to.lowercase()))
+
+        val subjectTokens = significantTokens(email.subject)
+        val bodyTokens = significantTokens(email.body)
+        val overlap = (subjectTokens + bodyTokens).count { normalized.contains(it) }
+        assertTrue(
+            "Voice confirmation did not read back enough of the prepared email for informed consent: $prompt",
+            overlap >= 3,
+        )
+    }
+
+    private fun significantTokens(text: String): Set<String> =
+        text.lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 5 && it !in READBACK_STOP_WORDS }
+            .toSet()
+
+    private fun awaitEmailApproval(context: Context, subject: String): PendingAction {
+        val dao = MyApplication.database.pendingActionDao()
+        val deadline = System.currentTimeMillis() + PLANNING_TIMEOUT_MS
+        var lastStatus = RuntimePrefs.getStatus(context)
+        while (System.currentTimeMillis() < deadline) {
+            val pending = runBlocking { dao.getActionsByStatus("pending") }
+                .firstOrNull { action ->
+                    action.source == "tasker_agent" &&
+                        action.actionJson.contains(RECIPIENT, ignoreCase = true) &&
+                        action.actionJson.contains(subject)
+                }
+            if (pending != null) return pending
+
+            lastStatus = RuntimePrefs.getStatus(context)
+            val error = RuntimePrefs.getLastError(context)
+            if (error != "(none)" && error.isNotBlank()) {
+                throw AssertionError("Local Agent failed before requesting email approval: status=$lastStatus error=$error")
+            }
+            Thread.sleep(1_000L)
+        }
+        throw AssertionError("Timed out waiting for SendEmail approval. Last status=$lastStatus")
+    }
+
+    private fun awaitVoicePrompt(context: Context, email: LocalAgentAction.SendEmail): String {
+        val deadline = System.currentTimeMillis() + VOICE_PROMPT_TIMEOUT_MS
+        var last = ""
+        while (System.currentTimeMillis() < deadline) {
+            last = RuntimePrefs.getLastApprovalVoicePrompt(context)
+            if (last.isNotBlank() && last.contains(email.to, ignoreCase = true)) return last
+            Thread.sleep(250L)
+        }
+        throw AssertionError("Voice confirmation prompt was not prepared. Last prompt=$last status=${RuntimePrefs.getStatus(context)}")
+    }
+
+    private fun awaitClarificationPrompt(context: Context, initialPrompt: String): String {
+        val deadline = System.currentTimeMillis() + CLARIFICATION_PROMPT_TIMEOUT_MS
+        var last = RuntimePrefs.getLastApprovalVoicePrompt(context)
+        while (System.currentTimeMillis() < deadline) {
+            last = RuntimePrefs.getLastApprovalVoicePrompt(context)
+            if (last.isNotBlank() && last != initialPrompt) return last
+            val error = RuntimePrefs.getLastError(context)
+            if (error != "(none)" && error.isNotBlank()) {
+                throw AssertionError("Voice clarification failed: status=${RuntimePrefs.getStatus(context)} error=$error")
+            }
+            Thread.sleep(250L)
+        }
+        throw AssertionError("Ambiguous reply never produced a new spoken clarification. Last prompt=$last")
+    }
+
+    private fun awaitApprovalExecution(id: Long): PendingAction {
+        val dao = MyApplication.database.pendingActionDao()
+        val deadline = System.currentTimeMillis() + APPROVAL_EXECUTION_TIMEOUT_MS
+        var last: PendingAction? = null
+        while (System.currentTimeMillis() < deadline) {
+            last = runBlocking { dao.getActionById(id) }
+            if (last?.status == "executed") return last
+            if (last?.status == "rejected") {
+                throw AssertionError("Explicit voice approval unexpectedly rejected the pending email: ${last.result}")
+            }
+            Thread.sleep(500L)
+        }
+        throw AssertionError("Timed out waiting for the approved SendEmail action to execute. Last record=$last")
+    }
+
+    private fun awaitSelfDeliveredMessage(context: Context, subject: String): LocalAgentObservation {
+        val deadline = System.currentTimeMillis() + DELIVERY_TIMEOUT_MS
+        var lastObservation: LocalAgentObservation? = null
+        while (System.currentTimeMillis() < deadline) {
+            lastObservation = runBlocking { TaskerExecutionBackend.observe(context) }
+            val text = lastObservation?.screenText.orEmpty()
+            if (
+                lastObservation?.packageName == HilTestSupport.GMAIL_PACKAGE &&
+                text.contains(subject, ignoreCase = true) &&
+                !looksLikeComposer(text)
+            ) {
+                return lastObservation
+            }
+
+            val error = RuntimePrefs.getLastError(context)
+            // Tasker/AutoInput can time out during Android's chooser -> Gmail
+            // transition. The service retries observation; retain the strict
+            // two-minute Gmail delivery oracle rather than failing on one miss.
+            if (error != "(none)" && error.isNotBlank() &&
+                error != "tasker_observation_failed_or_timed_out") {
+                throw AssertionError(
+                    "Local Agent failed after email approval: status=${RuntimePrefs.getStatus(context)} error=$error observation=$text",
+                )
+            }
+            Thread.sleep(1_500L)
+        }
+        throw AssertionError(
+            "Timed out waiting for the self-delivered Gmail subject after approval. Last observation=${lastObservation?.screenText}",
+        )
+    }
+
+    private fun awaitTerminalStatus(context: Context): String {
+        val deadline = System.currentTimeMillis() + 60_000L
+        var status = RuntimePrefs.getStatus(context)
+        while (System.currentTimeMillis() < deadline) {
+            status = RuntimePrefs.getStatus(context)
+            if (!status.startsWith("Tasker step", ignoreCase = true) &&
+                !status.startsWith("Speaking voice", ignoreCase = true) &&
+                !status.startsWith("Listening for confirmation", ignoreCase = true) &&
+                !status.startsWith("Asking for clarification", ignoreCase = true) &&
+                !status.startsWith("Connecting", ignoreCase = true)
+            ) {
+                return status
+            }
+            Thread.sleep(500L)
+        }
+        return status
+    }
+
+    private fun looksLikeComposer(text: String): Boolean {
+        val normalized = text.lowercase()
+        return normalized.contains(RECIPIENT) &&
+            (normalized.contains("send") || normalized.contains("subject") || normalized.contains("compose"))
+    }
+
+    private fun setBlockedPackages(context: Context, packages: String) {
+        context.sendBroadcast(
+            Intent(ACTION_HIL_SET_LOCALAGENT_BLOCKED)
+                .setPackage(HilTestSupport.TASKER_PACKAGE)
+                .putExtra("packages", packages),
+        )
+    }
+
+    private fun buildGoal(subject: String): String =
+        "Open Chrome. On the CyanBridge HIL Search page, search for 'latest smartglasses news', " +
+            "open the first result, read only the first visible article without scrolling, and write a concise, useful summary of the concrete facts you actually observe. " +
+            "Then prepare a reasonable email to $RECIPIENT with the exact subject '$subject'. The body should make clear that this is an automated CyanBridge HIL test using deterministic fixture data rather than live news, and should summarize the important observed product details in natural language. Use the send_email action for the prepared message. " +
+            "Before any email submission, CyanBridge must describe/read back the prepared send aloud and listen for the user's spoken answer. " +
+            "If the answer is ambiguous, ask a spoken clarification and keep waiting; do not treat ambiguity as rejection or approval. " +
+            "Only after an unambiguous affirmative answer may Tasker proceed with Gmail and click the visible Send control. Because the recipient is this same test account, wait for " +
+            "the sent message with subject '$subject' to appear in Gmail, then finish and tell the user the test email was sent."
+
+    companion object {
+        private const val RECIPIENT = "fernandosaiyan10@gmail.com"
+        private const val CHROME_PACKAGE = "com.android.chrome"
+        private const val SEARCH_MARKER = "CYANBRIDGE_HIL_NEWS_SEARCH_73551"
+        private const val ARTICLE_MARKER = "CYANBRIDGE_HIL_NEWS_ARTICLE_73551"
+        private const val FIXTURE_TIMEOUT_MS = 45_000L
+        private const val ACTION_HIL_SET_LOCALAGENT_BLOCKED =
+            "com.fersaiyan.cyanbridge.HIL_SET_LOCALAGENT_BLOCKED"
+        private const val PLANNING_TIMEOUT_MS = 10 * 60_000L
+        private const val VOICE_PROMPT_TIMEOUT_MS = 30_000L
+        private const val CLARIFICATION_PROMPT_TIMEOUT_MS = 90_000L
+        private const val APPROVAL_EXECUTION_TIMEOUT_MS = 45_000L
+        private const val DELIVERY_TIMEOUT_MS = 2 * 60_000L
+        private val READBACK_STOP_WORDS = setOf(
+            "cyanbridge", "smartglasses", "summary", "automated", "deterministic", "fixture", "email",
+        )
+    }
+
+    /**
+     * Loopback-only news fixture. The article carries every grounding signal
+     * the body assertions require (42, eight hours, Cobalt Horizon 88417) so
+     * no live network is involved in the email content.
+     */
+    private class HilNewsFixtureServer : Closeable {
+        private val running = AtomicBoolean(true)
+        private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        private val worker = thread(name = "cyanbridge-hil-news", isDaemon = true) {
+            while (running.get()) {
+                val socket = runCatching { server.accept() }.getOrNull() ?: break
+                runCatching { respond(socket) }
+                runCatching { socket.close() }
+            }
+        }
+
+        val searchUrl: String = "http://127.0.0.1:${server.localPort}/"
+
+        private fun respond(socket: Socket) {
+            socket.soTimeout = 5_000
+            val reader = socket.getInputStream().bufferedReader(StandardCharsets.US_ASCII)
+            val requestLine = reader.readLine().orEmpty()
+            while (reader.readLine()?.isNotEmpty() == true) Unit
+            // Single-page fixture: all stages live in SEARCH_HTML and toggle
+            // client-side, so no cross-URL navigation can trip Chrome's
+            // insecure-form interstitial on loopback HTTP.
+            val body = SEARCH_HTML.toByteArray(StandardCharsets.UTF_8)
+            socket.getOutputStream().buffered().use { out ->
+                out.write(
+                    ("HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: text/html; charset=utf-8\r\n" +
+                        "Content-Length: ${body.size}\r\n" +
+                        "Cache-Control: no-store\r\n" +
+                        "Connection: close\r\n\r\n").toByteArray(StandardCharsets.US_ASCII),
+                )
+                out.write(body)
+            }
+        }
+
+        override fun close() {
+            running.set(false)
+            runCatching { server.close() }
+            worker.join(2_000L)
+        }
+
+        companion object {
+            private const val SEARCH_HTML = """
+                <!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
+                <body>
+                <div id="searchPage">
+                  <h1>CYANBRIDGE_HIL_NEWS_SEARCH_73551</h1>
+                  <label for="query">Search news</label>
+                  <input id="query" name="q" aria-label="Search news">
+                  <button type="button" id="searchBtn" onclick="document.getElementById('searchPage').style.display='none';document.getElementById('resultsPage').style.display='block';">Search</button>
+                </div>
+                <div id="resultsPage" style="display:none">
+                  <h1>News results</h1>
+                  <a href="#" id="firstResult" onclick="document.getElementById('resultsPage').style.display='none';document.getElementById('articlePage').style.display='block';return false;">Cobalt Horizon 88417 smartglasses — first result</a>
+                  <a href="#" onclick="return false;">Unrelated second result</a>
+                </div>
+                <div id="articlePage" style="display:none">
+                  <h1>CYANBRIDGE_HIL_NEWS_ARTICLE_73551 — Cobalt Horizon 88417</h1>
+                  <p>The Cobalt Horizon 88417 smartglasses pack 42 sensors and run for
+                  eight hours on a single charge. CyanBridge owns planning and safety,
+                  while Tasker only observes the screen and executes approved UI actions.</p>
+                </div>
+                </body></html>
+            """
+        }
+    }
+}

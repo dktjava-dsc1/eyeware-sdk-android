@@ -1,0 +1,76 @@
+<resources>
+    <string name="app_name">CyanBridge</string>
+    <string name="language_system_default">跟随系统</string>
+    <string name="language_selection_title">选择应用语言</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_save">保存</string>
+    <string name="walking_aid_title">行走辅助</string>
+    <string name="walking_aid_settings">行走辅助设置</string>
+    <string name="walking_aid_general">常规</string>
+    <string name="walking_aid_capture_interval">拍摄间隔</string>
+    <string name="walking_aid_image_recognition">图像识别</string>
+    <string name="walking_aid_depth_estimation">深度估计</string>
+    <string name="walking_aid_output">输出</string>
+    <string name="walking_aid_tts_enabled">语音播报描述</string>
+    <string name="walking_aid_safety_disclaimer">首次警告时显示安全声明</string>
+    <string name="walking_aid_history">图像历史</string>
+    <string name="walking_aid_clear_history">清除历史</string>
+    <string name="walking_aid_source_local">本地（设备端）</string>
+    <string name="walking_aid_source_cloud">云端（Pro）</string>
+    <string name="walking_aid_not_connected">Walking Aid：眼镜未连接。请先连接您的眼镜。</string>
+    <string name="walking_aid_meeting_active">Walking Aid：会议录音已激活。请在启用Walking Aid前停止会议。</string>
+    <string name="onboarding_glasses_connection_title">连接眼镜</string>
+    <string name="onboarding_glasses_connection_desc">允许 CyanBridge 查找并连接附近的眼镜。</string>
+    <string name="onboarding_glasses_connection_details">蓝牙权限仅用于发现、配对和与眼镜通信。您可以现在不允许，稍后连接设备时再授予权限。</string>
+    <string name="onboarding_optional_features_title">可选功能，由您选择</string>
+    <string name="onboarding_optional_features_desc">AutoDiary、Auto Audio、Local Agent 和 Pro 功能都是可选的，可在插件中配置。</string>
+    <string name="onboarding_optional_features_details">先连接眼镜，然后在准备好时探索插件。每个插件都会说明功能，并在启用时只请求所需权限。您可以随时查看或关闭功能。</string>
+    <string name="onboarding_open_source_title">坚持开源</string>
+    <string name="onboarding_open_source_desc">查看代码、报告问题并帮助改进 CyanBridge。</string>
+    <string name="onboarding_open_source_details">CyanBridge 是开源项目。您可以查看代码了解行为，报告错误或安全问题，提出改进建议，或通过 GitHub 贡献代码。</string>
+    <string name="onboarding_skip_all">全部跳过</string>
+    <string name="onboarding_back">返回</string>
+    <string name="onboarding_next">下一步</string>
+    <string name="onboarding_get_started">开始使用</string>
+    <string name="meta_diagnostics_title">Meta Ray-Ban 诊断</string>
+    <string name="meta_diagnostics_description">CyanBridge 将收集最近的 Meta DAT 状态、错误、设备详情和筛选后的 logcat 日志，以便调查问题。</string>
+    <string name="nav_transcriptions_recordings">媒体</string>
+    <string name="text_10">蓝牙配对</string>
+    <string name="text_11">注册报告监听器</string>
+    <string name="text_16">导出 OTA 服务器信息</string>
+    <string name="text_17">测试拉取模式 OTA (writeIpToSoc)</string>
+
+    <string name="battery_opt_title">保持 CyanBridge 运行</string>
+    <string name="battery_opt_not_supported">此 Android 版本不提供电池优化设置。</string>
+    <string name="battery_opt_cant_open_settings">无法在此设备上打开设置。</string>
+
+
+
+    <string name="onboarding_local_model_title">选择设备端 AI</string>
+    <string name="onboarding_local_model_desc">选择一个入门模型。CyanBridge 会在您完成设置期间于后台下载该模型。</string>
+    <string name="onboarding_local_model_details">系统会根据模型自动选择生成设置，并优先使用 GPU 加速。以后可以在“本地模型”中更改或导入模型。</string>
+    <string name="onboarding_accessibility_disclosure_title">无障碍访问说明</string>
+    <string name="onboarding_accessibility_disclosure_body">CyanBridge 没有自己的无障碍服务。屏幕记忆和本地智能体通过 Tasker 和 AutoInput 工作：AutoInput 的无障碍服务读取屏幕上应用的文字和界面结构，并让本地智能体代您点按、输入、滚动和导航。AutoInput 的无障碍功能由您自行开启，CyanBridge 绝不会自动开启。屏幕内容会在本地存储，用于屏幕记忆。当您请本地智能体执行操作时，当前屏幕内容可能会由您选择的 AI 提供商处理；如果您选择了云端提供商，也可能由云端处理。屏幕截图是可选的，默认关闭。您可以在 CyanBridge Local Agent 的 Tasker 配置文件中开启；开启后，每张用于规划的截图都会发送给您选择的规划器，包括云端或 Pro 规划器。您在 Tasker 中屏蔽的应用会被跳过。您可以随时关闭 AutoInput 的无障碍功能、屏幕记忆或本地智能体。</string>
+    <string name="meta_pairing_title">配对 Meta 眼镜</string>
+
+
+    <string name="chat_deleted">聊天已删除</string>
+    <string name="synced_media_folder_hint">正在显示以下位置的文件：%1$s</string>
+    <string name="synced_media_open_failed">无法打开此媒体项目。</string>
+
+    <string name="donation_intro_dialog_title">CyanBridge Asaas 支持说明</string>
+    <string name="donation_intro_dialog_message">您好，感谢您考虑向 CyanBridge 捐赠！我在攻读博士的同时维护这个项目，您的支持对我意义重大。由于巴西企业有特殊要求，我还没能配置 Stripe，因此目前使用名为 Asaas 的支付处理商。结账页面是葡萄牙语，如有需要请使用 Google 翻译。我正在积极寻找更好的替代方案。再次感谢您的支持！</string>
+    <string name="donation_intro_open_button">打开 Asaas 银行卡表单</string>
+    <string name="meta_registration_channel_name">Meta 眼镜连接</string>
+    <string name="meta_registration_lost_title">Meta 眼镜已断开</string>
+    <string name="meta_registration_lost_dev_mode_text">CyanBridge 已不再连接到 Meta AI。可能是开发者模式被关闭了。请在 Meta AI 中重新开启，然后在 CyanBridge 中重新注册。</string>
+    <string name="meta_registration_lost_invite_text">CyanBridge 已不再连接到 Meta AI。请保持开发者模式关闭，然后在 CyanBridge 中重新注册。</string>
+    <string name="meta_registration_register_again">重新注册</string>
+    <string name="voice_profile_status_none">尚未录入。说三句简短的话，CyanBridge 就能学会你的声音。目前不会过滤回答。</string>
+    <string name="voice_profile_status_enrolled">录入于 %1$s。目前不会过滤回答。</string>
+    <string name="voice_profile_status_model_ready">声音模型：%1$s（已安装）</string>
+    <string name="voice_profile_status_model_missing">声音模型：%1$s（尚未安装；在此之前会保留你的录音）</string>
+    <string name="voice_profile_delete_title">删除声纹档案？</string>
+    <string name="voice_profile_delete_body">这会从这部手机上删除你录制的句子和声纹模板。</string>
+    <string name="voice_profile_delete_confirm">删除</string>
+</resources>

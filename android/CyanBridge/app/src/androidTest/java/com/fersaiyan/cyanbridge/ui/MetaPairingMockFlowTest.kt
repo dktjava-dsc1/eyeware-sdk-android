@@ -1,0 +1,239 @@
+package com.fersaiyan.cyanbridge.ui
+
+import android.content.Context
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.fersaiyan.cyanbridge.devices.metarayban.MetaRaybanManager
+import com.fersaiyan.cyanbridge.ui.theme.CyanBridgeTheme
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import androidx.test.platform.app.InstrumentationRegistry
+import android.graphics.BitmapFactory
+import com.fersaiyan.cyanbridge.glasses.GlassesSessionCoordinator
+import com.fersaiyan.cyanbridge.glasses.GlassesSession
+import org.junit.After
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class MetaPairingMockFlowTest {
+    @get:Rule
+    val composeRule = createComposeRule()
+
+    private val context: Context
+        get() = ApplicationProvider.getApplicationContext()
+
+    private fun manager(): MetaRaybanManager = MetaRaybanManager.getInstance(context)
+
+    @After
+    fun tearDown() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { manager().destroy() }
+    }
+
+    @Test
+    fun mockEnabledShowsRegisteredAndMockDevice() {
+        val mgr = manager()
+        mgr.setDebugMockEnabled(true)
+
+        composeRule.setContent {
+            CyanBridgeTheme {
+                MetaPairingScreen(
+                    state = MetaPairingScreenState(
+                        androidCameraGranted = true,
+                        nearbyDevicesGranted = true,
+                        initialized = true,
+                        registrationState = MetaRaybanManager.RegistrationState.REGISTERED,
+                        availableDeviceCount = 1,
+                        selectedDeviceName = "Mock Ray-Ban (Debug)",
+                        glassesCameraGranted = true,
+                        debugMockEnabled = true,
+                    ),
+                    onBack = {},
+                    onOpenMetaAi = {},
+                    onPrimaryAction = {},
+                    onRetryPairing = {},
+                    onSendDiagnostics = {},
+                    onToggleMock = { mgr.setDebugMockEnabled(it) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Continue").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("meta_pairing_screen").assertExists()
+        composeRule.onNodeWithText("Registered").assertExists()
+        // LazyColumn items below the compact hosted-emulator viewport are not composed
+        // until scrolled into view.
+        composeRule.onNodeWithTag("meta_pairing_screen").performScrollToNode(hasText("Mock Ray-Ban (Debug)"))
+        composeRule.onNodeWithText("Mock Ray-Ban (Debug)").assertIsDisplayed()
+        // Scroll to bottom where mock card + primary button live
+        composeRule.onNodeWithTag("meta_pairing_screen").performScrollToNode(hasTestTag("meta_mock_switch"))
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Glasses camera allowed").assertExists()
+        composeRule.onNodeWithText("Test AI image question (mock)").assertExists()
+        composeRule.onNodeWithText("Debug: Mock Ray-Ban").assertExists()
+        composeRule.onNodeWithTag("meta_mock_switch", useUnmergedTree = true).assertIsOn()
+    }
+
+    @Test
+    fun mockToggleSwitchCanDisable() {
+        val mgr = manager()
+        mgr.setDebugMockEnabled(true)
+        assertTrue(mgr.debugMockEnabled.value)
+        assertEquals(MetaRaybanManager.RegistrationState.REGISTERED, mgr.registrationState.value)
+        mgr.setDebugMockEnabled(false)
+        assertEquals(false, mgr.debugMockEnabled.value)
+        // Re-enable for next test isolation
+        mgr.setDebugMockEnabled(true)
+        assertTrue(mgr.debugMockEnabled.value)
+    }
+
+    @Test
+    fun debugMockEnablesFullDatFlowWithoutHardware() {
+        val mgr = manager()
+
+        // Start clean
+        mgr.setDebugMockEnabled(false)
+        assertEquals(false, mgr.debugMockEnabled.value)
+
+        // Enable mock — should synthesize REGISTERED + device + permissions
+        mgr.setDebugMockEnabled(true)
+        assertTrue(mgr.isInitialized.value)
+        assertEquals(MetaRaybanManager.RegistrationState.REGISTERED, mgr.registrationState.value)
+        assertTrue(mgr.availableDeviceCount.value > 0)
+        assertEquals("Mock Ray-Ban (Debug)", mgr.selectedDeviceName.value)
+
+        // Session/stream/photo should work without real Meta AI or glasses
+        runBlocking {
+            var sessionOk = false
+            var streamOk = false
+            // Use callbacks with runBlocking bridge
+            mgr.startSession(
+                onSuccess = { sessionOk = true },
+                onError = { throw AssertionError("startSession failed: $it") },
+            )
+            // startSession mock is synchronous
+            assertTrue("Mock session should start", sessionOk)
+
+            mgr.startStreaming(
+                onFrame = { /* ignore fake frame */ },
+                onSuccess = { streamOk = true },
+                onError = { throw AssertionError("startStreaming failed: $it") },
+            )
+            assertTrue("Mock stream should start", streamOk)
+            assertTrue(mgr.isStreaming.value)
+
+            // Capture mock photo — should persist to MediaStore/DCIM and return bytes
+            var captured: MetaRaybanManager.CapturedPhoto? = null
+            mgr.capturePhoto(
+                onSuccess = { captured = it },
+                onError = { throw AssertionError("capturePhoto failed: $it") },
+            )
+            // capturePhoto is async via scope.launch — wait briefly
+            var waited = 0
+            while (captured == null && waited < 2000) {
+                Thread.sleep(100)
+                waited += 100
+            }
+            assertNotNull("Mock photo should be captured", captured)
+            assertTrue(captured!!.bytes.isNotEmpty())
+            assertEquals("image/jpeg", captured!!.mimeType)
+
+            // Cleanup session/stream
+            mgr.stopStreaming()
+            mgr.stopSession()
+        }
+
+        // Verify disable restores real DAT observation (even if still UNAVAILABLE on emulator)
+        mgr.setDebugMockEnabled(false)
+        assertEquals(false, mgr.debugMockEnabled.value)
+        // After disable, manager should have reset mock device name
+        assertTrue(mgr.selectedDeviceName.value == null || mgr.selectedDeviceName.value != "Mock Ray-Ban (Debug)")
+    }
+
+    @Test
+    fun oneShotPhotoStartsAndReleasesMockSessionForAssistantAndPlugins() {
+        val mgr = manager()
+        mgr.setDebugMockEnabled(true)
+
+        val photo = runBlocking { withTimeout(5_000) { mgr.capturePhotoOnce() } }
+
+        assertTrue(photo.bytes.isNotEmpty())
+        assertEquals("image/jpeg", photo.mimeType)
+        assertEquals(MetaRaybanManager.StreamState.STOPPED, mgr.streamState.value)
+        assertEquals(MetaRaybanManager.DeviceSessionState.IDLE, mgr.deviceSessionState.value)
+    }
+
+    @Test
+    fun mockCameraPermissionAndOneShotPreserveAnAlreadyRunningPreview() {
+        val mgr = manager()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            mgr.setDebugMockEnabled(true)
+            var permissionGranted = false
+            mgr.checkCameraPermission(
+                onGranted = { permissionGranted = true },
+                onRequestNeeded = { throw AssertionError("Mock must not open Meta AI authorization") },
+                onError = { throw AssertionError(it) },
+            )
+            assertTrue(permissionGranted)
+            mgr.startSession({}, { throw AssertionError(it) })
+            mgr.startStreaming({}, {}, { throw AssertionError(it) })
+        }
+        val photo = runBlocking { withTimeout(5_000) { mgr.capturePhotoOnce() } }
+        val bitmap = BitmapFactory.decodeByteArray(photo.bytes, 0, photo.bytes.size)
+        assertNotNull("Mock must deliver a usable image, not just READY labels", bitmap)
+        bitmap?.recycle()
+        assertTrue(mgr.isStreaming.value)
+        assertEquals(MetaRaybanManager.DeviceSessionState.STARTED, mgr.deviceSessionState.value)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { mgr.setDebugMockEnabled(false) }
+        assertFalse(mgr.isInitialized.value)
+        assertFalse(mgr.isStreaming.value)
+        assertFalse(mgr.cameraPermissionGranted.value)
+        val lease = GlassesSessionCoordinator.tryAcquireLease(GlassesSession.META_CAMERA)
+        assertNotNull("Disabling mock must release its transport lease", lease)
+        lease?.let { GlassesSessionCoordinator.release(it) }
+    }
+
+    @Test
+    fun successfulPermissionCheckClearsOnlyRecoveredCameraErrors() {
+        val mgr = manager()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            mgr.setDebugMockEnabled(true)
+            mgr.reportExternalError("cameraPermission", "All discovered devices are powered off or disconnected")
+            mgr.recordCameraPermissionResult(true)
+            assertEquals(null, mgr.lastError.value)
+            mgr.reportExternalError("stream", "Camera closed")
+            mgr.recordCameraPermissionResult(true)
+            assertEquals("stream: Camera closed", mgr.lastError.value)
+        }
+    }
+
+    @Test
+    fun mockBypassesMetaAiRequiredError() {
+        // Without mock, Meta AI not installed on emulator -> error
+        val noMockState = MetaPairingScreenState(
+            metaAiInstalled = false,
+            initialized = true,
+            debugMockEnabled = false,
+        )
+        assertNotNull(inferredMetaPairingError(noMockState))
+
+        // With mock enabled, same device should not report error
+        val mockState = noMockState.copy(debugMockEnabled = true)
+        assertEquals(null, inferredMetaPairingError(mockState))
+    }
+}

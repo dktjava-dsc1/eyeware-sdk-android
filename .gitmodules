@@ -1,0 +1,3 @@
+[submodule "android/CyanBridge/app/src/main/myvu-upstream"]
+	path = android/CyanBridge/app/src/main/myvu-upstream
+	url = https://github.com/FerSaiyan/Meizu-Myvu-Client.git

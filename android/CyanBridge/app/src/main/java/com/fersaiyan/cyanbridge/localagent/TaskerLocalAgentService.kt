@@ -1,0 +1,579 @@
+package com.fersaiyan.cyanbridge.localagent
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.IBinder
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.fersaiyan.cyanbridge.MainActivity
+import com.fersaiyan.cyanbridge.R
+import com.fersaiyan.cyanbridge.BuildConfig
+import com.fersaiyan.cyanbridge.agent.LocalAgentPrefs
+import com.fersaiyan.cyanbridge.agent.LocalAgentPrefs as AutomationPrefs
+import com.fersaiyan.cyanbridge.ai.decision.EmbeddingDecisionEngine
+import com.fersaiyan.cyanbridge.ai.decision.FallbackDecisionEngine
+import com.fersaiyan.cyanbridge.ai.decision.LocalDecisionEngine
+import com.fersaiyan.cyanbridge.ai.decision.LocalDecision
+import com.fersaiyan.cyanbridge.ai.decision.DecisionCandidate
+import com.fersaiyan.cyanbridge.ai.decision.SingleTokenDecisionEngine
+import com.fersaiyan.cyanbridge.ai.decision.DecisionPromptBuilder
+import com.fersaiyan.cyanbridge.ai.router.AgentInferenceRouter
+import com.fersaiyan.cyanbridge.localmodels.engine.LiteRtEmbeddingFactory
+import com.fersaiyan.cyanbridge.localmodels.engine.LlamaCppTextEmbeddingEngine
+import com.fersaiyan.cyanbridge.localmodels.engine.TextEmbeddingEngine
+import com.fersaiyan.cyanbridge.localmodels.settings.LocalComputeBackend
+import com.fersaiyan.cyanbridge.localmodels.session.LocalChatSessionManager
+import com.fersaiyan.cyanbridge.localagent.actions.LocalAgentActionManager
+import com.fersaiyan.cyanbridge.localagent.actions.LocalAgentApprovalClarifier
+import com.fersaiyan.cyanbridge.localagent.actions.LocalAgentApprovalCoordinator
+import com.fersaiyan.cyanbridge.localagent.memory.LocalAgentMemoryStore
+import com.fersaiyan.cyanbridge.localagent.tasker.TaskerScreenshotStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Tasker-backed Local Agent runtime.
+ *
+ * CyanBridge owns the goal, planner, repeat/failure handling and approval policy.
+ * Tasker owns screen observation and action execution only. A Tasker execution
+ * failure is returned verbatim into task state so debugging has a single source
+ * of truth in CyanBridge.
+ */
+class TaskerLocalAgentService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var loopJob: Job? = null
+    private val cancelRequested = AtomicBoolean(false)
+    private var approvalDeferred: CompletableDeferred<Boolean>? = null
+    private lateinit var approvalVoiceSession: LocalAgentApprovalVoiceSession
+    private val decisionEngine by lazy {
+        SingleTokenDecisionEngine(
+            generate = { systemPrompt, userPrompt ->
+                AgentInferenceRouter.completeDecisionToken(
+                    context = applicationContext,
+                    sessionId = "local-agent-decision-${System.currentTimeMillis()}",
+                    systemPrompt = systemPrompt,
+                    userPrompt = userPrompt,
+                    maxTokens = 8,
+                )
+            },
+            promptBuilder = DecisionPromptBuilder::buildUiActionStatePrompt,
+        )
+    }
+    private var embeddingEngine: TextEmbeddingEngine? = null
+
+    /**
+     * Opt-in fast path: a lifecycle-owned EmbeddingGemma cosine gate ahead of
+     * the single-token LLM. Disabled by default; requires an HIL-provisioned
+     * GGUF path. Abstentions cascade to the single-token engine, then to the
+     * detailed JSON planner in the brain.
+     */
+    private fun sessionDecisionEngine(): LocalDecisionEngine {
+        val single: LocalDecisionEngine = decisionEngine
+        val gate = newEmbeddingDecisionEngine()
+        val active = if (gate == null) single else FallbackDecisionEngine(gate, single)
+        if (!BuildConfig.SHARED_GEMMA_PROTOTYPE && !BuildConfig.LITERT_DECISION_PROTOTYPE) return active
+        return object : LocalDecisionEngine {
+            override suspend fun choose(state: String, candidates: List<DecisionCandidate>, debugTag: String): LocalDecision {
+                val selected = active.choose(state, candidates, debugTag)
+                try {
+                    val shadow = LocalChatSessionManager.scoreSharedGemmaShadow(state, candidates)
+                    if (shadow != null) Log.i(TAG, "SHARED_GEMMA_SHADOW active=${selected.label} shadow=${shadow.label} margin=${shadow.margin} ${shadow.rawOutput}")
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "SHARED_GEMMA_SHADOW unavailable: ${error.message}")
+                }
+                return selected
+            }
+        }
+    }
+
+    private fun newEmbeddingDecisionEngine(): LocalDecisionEngine? {
+        if (!AutomationPrefs.isEmbeddingDecisionEnabled(applicationContext)) return null
+        val modelPath = AutomationPrefs.getEmbeddingModelPath(applicationContext)
+        if (modelPath.isBlank()) return null
+        val modelFile = java.io.File(modelPath)
+        if (!modelFile.isFile) {
+            Log.w(TAG, "Embedding gate disabled: missing model at $modelPath")
+            return null
+        }
+        val margin = AutomationPrefs.getEmbeddingMarginThreshold(applicationContext)
+        // Dual strategy: EmbeddingGemma 2 `.litertlm` on LiteRT-LM 0.18 (CPU) for users
+        // without a LiteRT chat model; GGUF embedders keep the llama.cpp path. The
+        // margin threshold was calibrated on EmbeddingGemma 1 and must be refit per model.
+        val embedder: TextEmbeddingEngine = if (modelFile.name.endsWith(".litertlm")) {
+            if (!LiteRtEmbeddingFactory.AVAILABLE) {
+                Log.w(TAG, "Embedding gate disabled: .litertlm embeddings need LiteRT-LM 0.18")
+                return null
+            }
+            LiteRtEmbeddingFactory.create(
+                modelPath, LocalComputeBackend.CPU, cacheDir.path, applicationInfo.nativeLibraryDir,
+            )
+        } else {
+            LlamaCppTextEmbeddingEngine(applicationContext, modelFile)
+        }
+        embeddingEngine = embedder
+        Log.i(TAG, "Embedding gate enabled model=${modelFile.name} margin>=$margin")
+        // Gemma classification protocol from the calibration benchmark: the
+        // same prefix on query and candidate prototypes. The gate query is
+        // capped well inside the calibration regime: a 687-token state string
+        // aborts the native embedding decode (SIGABRT in librnllama prefill),
+        // while short queries are reliable. Thresholds were fit on short
+        // queries, so over-long inputs would be out-of-calibration anyway.
+        // Probe: abortprobe.{0,1,2} on emulator-5554, 2026-09-20.
+        return EmbeddingDecisionEngine(
+            embedder = embedder,
+            queryText = { "task: classification | query: ${it.take(QUERY_MAX_CHARS)}" },
+            candidateText = { "task: classification | query: ${it.description}" },
+            minimumTopScore = -1f,
+            minimumMargin = margin,
+        )
+    }
+
+    private fun closeEmbeddingEngine() {
+        runCatching { embeddingEngine?.close() }
+        embeddingEngine = null
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        ensureNotificationChannel()
+        LocalAgentMemoryStore.ensureSeedFiles(applicationContext)
+        approvalVoiceSession = LocalAgentApprovalVoiceSession(applicationContext) { status ->
+            setStatus(status, null)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            LocalAgentIntents.ACTION_START -> startLoop(intent.getStringExtra(LocalAgentIntents.EXTRA_GOAL))
+            LocalAgentIntents.ACTION_STOP -> stopLoop("user")
+            LocalAgentIntents.ACTION_GET_STATUS -> emitStatus()
+            LocalAgentIntents.ACTION_READ_SCREEN_ALOUD -> readScreenAloudOnce()
+            LocalAgentIntents.ACTION_APPROVAL_REPLY -> {
+                val reply = intent.getStringExtra(LocalAgentIntents.EXTRA_APPROVAL_REPLY).orEmpty()
+                if (approvalDeferred != null) {
+                    approvalVoiceSession.submitExternalReply(reply)
+                } else if (reply.isNotBlank()) {
+                    scope.launch {
+                        val result = LocalAgentApprovalCoordinator.handleReply(applicationContext, reply)
+                        if (result.kind == LocalAgentApprovalCoordinator.ReplyKind.UNKNOWN) {
+                            setStatus("No active voice confirmation understood that reply", null)
+                        }
+                    }
+                }
+            }
+            LocalAgentIntents.ACTION_RESUME_AFTER_APPROVAL -> {
+                val rejected = intent.getBooleanExtra(LocalAgentIntents.EXTRA_REJECTED, false)
+                approvalDeferred?.takeIf { !it.isCompleted }?.complete(!rejected)
+            }
+            LocalAgentIntents.ACTION_DEMO -> startLoop("Open the notification shade, then return home.")
+        }
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        if (loopJob?.isActive == true && !cancelRequested.get()) {
+            setStatus("Stopped", "service_destroy")
+        }
+        cancelRequested.set(true)
+        loopJob?.cancel()
+        loopJob = null
+        approvalDeferred?.takeIf { !it.isCompleted }?.complete(false)
+        approvalDeferred = null
+        if (::approvalVoiceSession.isInitialized) approvalVoiceSession.close()
+        closeEmbeddingEngine()
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private fun readScreenAloudOnce() {
+        if (loopJob?.isActive == true) return
+        startForeground(NOTIFICATION_ID, notification("Reading screen through Tasker"))
+        setStatus("Reading screen through Tasker", null)
+        loopJob = scope.launch {
+            val result = withTimeoutOrNull(EXECUTION_TIMEOUT_MS) {
+                TaskerExecutionBackend.execute(applicationContext, LocalAgentAction.ReadScreenAloud)
+            } ?: LocalAgentBackendExecutionResult(false, "tasker_execution_timeout")
+            if (result.success) {
+                finishService("Screen read aloud", null)
+            } else {
+                finishService("Screen read failed", result.detail)
+            }
+        }
+        activeJob = loopJob
+    }
+
+    private fun startLoop(goalRaw: String?) {
+        if (loopJob?.isActive == true) return
+        if (!AutomationPrefs.isLocalAgentAutomationEnabled(applicationContext)) {
+            finishService("Disabled", "local_agent_automation_disabled")
+            return
+        }
+
+        val goal = goalRaw?.trim().orEmpty()
+        if (goal.isBlank()) {
+            finishService("Missing goal", "missing_goal")
+            return
+        }
+
+        cancelRequested.set(false)
+        startForeground(NOTIFICATION_ID, notification("Tasker agent: ${goal.take(48)}"))
+        setStatus("Connecting to Tasker", null)
+
+        loopJob = scope.launch {
+            val backend: LocalAgentExecutionBackend = TaskerExecutionBackend
+            val sessionEngine = sessionDecisionEngine()
+            val brain: LocalAgentBrain = RemoteUiControlLocalAgentBrain { sessionEngine }
+            var taskState = LocalAgentTaskState(
+                goal = goal,
+                maxSteps = AutomationPrefs.getMaxSteps(applicationContext),
+                startedAtMs = System.currentTimeMillis(),
+            )
+            var pendingSavedSkill = LocalAgentSkillStore.findExact(applicationContext, goal)
+
+            while (isActive && !cancelRequested.get() && taskState.stepIndex <= taskState.maxSteps) {
+                val availability = LocalAgentDeviceState.availability(applicationContext)
+                if (availability != LocalAgentDeviceState.Availability.READY) {
+                    finishService("Stopped: ${availability.statusText}", availability.errorCode)
+                    return@launch
+                }
+
+                setStatus("Tasker step ${taskState.stepIndex}/${taskState.maxSteps}", null)
+
+                val observation = withTimeoutOrNull(OBSERVATION_TIMEOUT_MS) {
+                    backend.observe(applicationContext)
+                }
+                if (observation == null) {
+                    taskState = taskState.nextStep(
+                        previousActionResult = "tasker_observation_failed_or_timed_out",
+                        failed = true,
+                    )
+                    setStatus("Waiting for Tasker observation", "tasker_observation_failed_or_timed_out")
+                    delay(RETRY_DELAY_MS)
+                    continue
+                }
+
+                val replayingSavedSkill = pendingSavedSkill != null
+                val output = try {
+                    pendingSavedSkill?.let { skill ->
+                        pendingSavedSkill = null
+                        LocalAgentBrainOutput(
+                            actions = skill.actions,
+                            note = "Replaying saved navigation skill through Tasker.",
+                        )
+                    } ?: withTimeoutOrNull(BRAIN_TIMEOUT_MS) {
+                        brain.next(applicationContext, taskState, observation)
+                    } ?: LocalAgentBrainOutput(
+                        actions = listOf(LocalAgentAction.Finish("Brain call timed out.")),
+                        note = "brain_timeout",
+                        isComplete = true,
+                    )
+                } finally {
+                    // The optional Tasker screenshot is only for this planning step.
+                    TaskerScreenshotStore.delete(applicationContext, observation.screenshotPath)
+                }
+
+                if (output.actions.isEmpty()) {
+                    taskState = taskState.nextStep(output.note ?: "no_action", failed = true)
+                    continue
+                }
+
+                var stepFailed = false
+                var requiresFreshObservation = false
+                val resultParts = mutableListOf<String>()
+
+                for (action in output.actions) {
+                    if (cancelRequested.get()) break
+                    if (action is LocalAgentAction.Finish) {
+                        finishService(action.message ?: output.note ?: "Done", null)
+                        return@launch
+                    }
+                    if (action is LocalAgentAction.Wait) {
+                        delay(action.ms)
+                        resultParts += "Wait: ok"
+                        continue
+                    }
+                    if (taskState.hasReachedRepeatLimit(action)) {
+                        val reason = LocalAgentRuntimePolicy.repeatLimitMessage(action)
+                        resultParts += reason
+                        stepFailed = true
+                        break
+                    }
+
+                    val risk = LocalAgentActionManager.classifyRisk(action)
+                    val requireConfirm = LocalAgentPrefs.isRequireActionConfirmationEnabled(applicationContext)
+                    val needsApproval = requireConfirm && risk == LocalAgentActionManager.Risk.HIGH
+
+                    if (needsApproval) {
+                        LocalAgentActionManager.processPlannedAction(
+                            applicationContext,
+                            action,
+                            source = "tasker_agent",
+                        )
+                        when (awaitApprovalConversation(goal, action)) {
+                            ApprovalOutcome.APPROVED -> {
+                                resultParts += "${action.javaClass.simpleName}: approved_and_executed_through_tasker"
+                                if (action is LocalAgentAction.SendEmail) {
+                                    taskState = taskState.copy(emailSendApproved = true)
+                                }
+                                requiresFreshObservation = true
+                            }
+                            ApprovalOutcome.REJECTED -> {
+                                resultParts += "${action.javaClass.simpleName}: rejected_by_user"
+                                stepFailed = true
+                                break
+                            }
+                            ApprovalOutcome.EXECUTION_FAILED -> {
+                                resultParts += "${action.javaClass.simpleName}: approved_but_tasker_execution_failed"
+                                stepFailed = true
+                                break
+                            }
+                            ApprovalOutcome.TIMED_OUT -> {
+                                finishService(
+                                    "Voice confirmation timed out; the action is still pending",
+                                    "approval_timeout_pending",
+                                )
+                                return@launch
+                            }
+                        }
+                    } else {
+                        val execution = withTimeoutOrNull(EXECUTION_TIMEOUT_MS) {
+                            backend.execute(applicationContext, action)
+                        } ?: LocalAgentBackendExecutionResult(false, "tasker_execution_timeout")
+                        resultParts += "${action.javaClass.simpleName}: ${execution.detail}"
+                        if (execution.success && output.note == ApprovedEmailUiStep.SEND_TAP_NOTE) {
+                            taskState = taskState.copy(emailUiSendAttempted = true)
+                        }
+                        if (execution.success && output.note == ApprovedEmailUiStep.CHOOSE_GMAIL_NOTE) {
+                            taskState = taskState.copy(emailChooserGmailSelected = true)
+                        }
+                        if (!execution.success) {
+                            stepFailed = true
+                            val recovery = LocalAgentRecoveryEngine.diagnose(
+                                lastFailedAction = action,
+                                screenText = observation.screenText,
+                                consecutiveFailures = taskState.consecutiveFailures + 1,
+                            )
+                            if (recovery != null) {
+                                val recoveryResult = backend.execute(applicationContext, recovery.action)
+                                resultParts += "recovery=${recovery.description}:${recoveryResult.detail}"
+                            }
+                            break
+                        }
+                    }
+
+                    taskState = taskState.copy(
+                        previousActionSignature = LocalAgentRuntimePolicy.actionSignature(action),
+                        identicalActionCount = if (
+                            taskState.previousActionSignature == LocalAgentRuntimePolicy.actionSignature(action)
+                        ) taskState.identicalActionCount + 1 else 1,
+                    )
+                }
+
+                if (replayingSavedSkill && stepFailed) {
+                    LocalAgentSkillStore.recordReplayFailure(applicationContext, taskState.goal)
+                }
+
+                val previousResult = buildString {
+                    output.note?.takeIf { it.isNotBlank() }?.let { append(it) }
+                    if (resultParts.isNotEmpty()) {
+                        if (isNotBlank()) append(" | ")
+                        append(resultParts.joinToString("; "))
+                    }
+                }
+                Log.i(TAG, previousResult)
+                taskState = taskState.nextStep(
+                    previousActionResult = previousResult,
+                    failed = stepFailed,
+                )
+
+                if (output.isComplete && !stepFailed && !requiresFreshObservation) {
+                    finishService(output.note ?: "Done", null)
+                    return@launch
+                }
+                delay(LocalAgentRuntimePolicy.settleDelayMs(output.actions.last()))
+            }
+
+            if (!cancelRequested.get()) {
+                finishService("Stopped after maximum steps", "max_steps_reached")
+            }
+        }
+        activeJob = loopJob
+    }
+
+    private enum class ApprovalOutcome { APPROVED, REJECTED, EXECUTION_FAILED, TIMED_OUT }
+
+    private suspend fun awaitApprovalConversation(
+        goal: String,
+        action: LocalAgentAction,
+    ): ApprovalOutcome {
+        val deferred = CompletableDeferred<Boolean>()
+        approvalDeferred = deferred
+        LocalAgentPrefs.clearLastApprovalVoiceReply(applicationContext)
+        val deadline = System.currentTimeMillis() + APPROVAL_TIMEOUT_MS
+        var prompt = LocalAgentApprovalClarifier.initialPrompt(action)
+        var silenceCount = 0
+
+        return try {
+            while (System.currentTimeMillis() < deadline && !cancelRequested.get()) {
+                if (deferred.isCompleted) {
+                    return if (deferred.await()) ApprovalOutcome.APPROVED else ApprovalOutcome.REJECTED
+                }
+
+                val remaining = (deadline - System.currentTimeMillis()).coerceAtLeast(1L)
+                val reply = approvalVoiceSession.askAndListen(
+                    prompt = prompt,
+                    timeoutMs = minOf(LocalAgentApprovalVoiceSession.DEFAULT_LISTEN_TIMEOUT_MS, remaining),
+                )
+
+                if (deferred.isCompleted) {
+                    return if (deferred.await()) ApprovalOutcome.APPROVED else ApprovalOutcome.REJECTED
+                }
+
+                if (reply.isNullOrBlank()) {
+                    silenceCount++
+                    prompt = if (silenceCount == 1) {
+                        "I didn’t catch an answer. The action is still waiting. Please say yes to continue or no to cancel."
+                    } else {
+                        "I’m still waiting for your confirmation. Say yes to continue or no to cancel."
+                    }
+                    continue
+                }
+
+                silenceCount = 0
+                when (LocalAgentApprovalCoordinator.classifyReply(reply)) {
+                    LocalAgentApprovalCoordinator.ReplyKind.APPROVE -> {
+                        setStatus("Voice approval received", null)
+                        val result = LocalAgentApprovalCoordinator.handleReply(applicationContext, reply)
+                        return if (result.executed) ApprovalOutcome.APPROVED else ApprovalOutcome.EXECUTION_FAILED
+                    }
+                    LocalAgentApprovalCoordinator.ReplyKind.REJECT -> {
+                        setStatus("Voice rejection received", null)
+                        LocalAgentApprovalCoordinator.handleReply(applicationContext, reply)
+                        return ApprovalOutcome.REJECTED
+                    }
+                    LocalAgentApprovalCoordinator.ReplyKind.UNKNOWN -> {
+                        setStatus("Asking for clarification", null)
+                        val clarification = withTimeoutOrNull(CLARIFICATION_TIMEOUT_MS) {
+                            LocalAgentApprovalClarifier.clarificationPrompt(
+                                context = applicationContext,
+                                originalGoal = goal,
+                                action = action,
+                                ambiguousReply = reply,
+                            )
+                        } ?: LocalAgentApprovalClarifier.ClarificationResult(
+                            text = LocalAgentApprovalClarifier.fallbackClarification(action, reply),
+                            usedModel = false,
+                            detail = "fallback:clarification_timeout",
+                        )
+                        Log.i(
+                            TAG,
+                            "Approval clarification source=${if (clarification.usedModel) "model" else "fallback"} " +
+                                "detail=${clarification.detail}",
+                        )
+                        prompt = clarification.text
+                    }
+                }
+            }
+            ApprovalOutcome.TIMED_OUT
+        } finally {
+            if (approvalDeferred === deferred) approvalDeferred = null
+        }
+    }
+
+    private fun stopLoop(reason: String) {
+        cancelRequested.set(true)
+        loopJob?.cancel()
+        loopJob = null
+        closeEmbeddingEngine()
+        approvalDeferred?.takeIf { !it.isCompleted }?.complete(false)
+        approvalDeferred = null
+        setStatus("Stopped", reason)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun finishService(status: String, error: String?) {
+        setStatus(status, error)
+        cancelRequested.set(true)
+        loopJob = null
+        closeEmbeddingEngine()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun setStatus(status: String, error: String?) {
+        LocalAgentPrefs.setStatus(applicationContext, status)
+        if (error == null) LocalAgentPrefs.clearLastError(applicationContext)
+        else LocalAgentPrefs.setLastError(applicationContext, error)
+        emitStatus()
+    }
+
+    private fun emitStatus() {
+        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(
+            Intent(LocalAgentIntents.ACTION_STATUS_CHANGED).apply {
+                putExtra(LocalAgentIntents.EXTRA_STATUS, LocalAgentPrefs.getStatus(applicationContext))
+                putExtra(LocalAgentIntents.EXTRA_LAST_ERROR, LocalAgentPrefs.getLastError(applicationContext))
+            }
+        )
+    }
+
+    private fun ensureNotificationChannel() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Local Agent", NotificationManager.IMPORTANCE_LOW)
+        )
+    }
+
+    private fun notification(content: String) = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setSmallIcon(R.mipmap.ic_launcher)
+        .setContentTitle("CyanBridge Local Agent")
+        .setContentText(content)
+        .setOngoing(true)
+        .setContentIntent(
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        )
+        .build()
+
+    companion object {
+        @Volatile
+        private var activeJob: Job? = null
+
+        /** True while a task loop or a screen read is in progress; a new task is ignored meanwhile. */
+        fun isRunning(): Boolean = activeJob?.isActive == true
+
+        private const val TAG = "TaskerLocalAgent"
+        private const val QUERY_MAX_CHARS = 1000
+        private const val CHANNEL_ID = "local_agent_tasker"
+        private const val NOTIFICATION_ID = 55244
+        private const val OBSERVATION_TIMEOUT_MS = 10_000L
+        private const val EXECUTION_TIMEOUT_MS = 30_000L
+        private const val BRAIN_TIMEOUT_MS = 90_000L
+        private const val APPROVAL_TIMEOUT_MS = 10 * 60_000L
+        private const val CLARIFICATION_TIMEOUT_MS = 60_000L
+        private const val RETRY_DELAY_MS = 1_000L
+    }
+}
